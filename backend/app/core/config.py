@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file="../../.env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -32,13 +32,13 @@ class Settings(BaseSettings):
 
     # ── Ollama ──────────────────────────────────────
     OLLAMA_HOST: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "qwen2.5-coder:32b"
+    OLLAMA_MODEL: str = "qwen2.5-coder:14b"
     OLLAMA_TIMEOUT: int = 120
 
     # ── Indexer ─────────────────────────────────────
     CHUNK_MAX_TOKENS: int = 512
     CHUNK_OVERLAP_TOKENS: int = 64
-    SUPPORTED_EXTENSIONS: str = ".java,.py,.ts,.js,.go,.kt,.scala,.rs,.cpp,.c,.cs"
+    SUPPORTED_EXTENSIONS: str = ".java,.ts,.js"
 
     # ── SQLite ──────────────────────────────────────
     SQLITE_PATH: Path = Path("./data/history.db")

@@ -20,55 +20,77 @@ const repo     = useRepoStore()
 const search   = useSearchStore()
 const analysis = useAnalysisStore()
 
-// ── Sidebar collapse ──────────────────────────────────────────────────────────
-const sidebarCollapsed = ref(false)
-const SIDEBAR_W = 260
+// ── Left sidebar ──────────────────────────────────────────────────────────────
+const leftW         = ref(260)
+const leftCollapsed = ref(false)
+const MIN_LEFT      = 180
+const MAX_LEFT      = 480
+const COLLAPSED_W   = 40          // icon-strip 宽度，始终可见
+const dragLeft      = ref(false)
 
-// ── Right panel drag ──────────────────────────────────────────────────────────
-const rightPanelW = ref(380)
-const MIN_RIGHT = 280
-const MAX_RIGHT = 640
-const dragging   = ref(false)
+// ── Right panel ───────────────────────────────────────────────────────────────
+const rightW       = ref(380)
+const MIN_RIGHT    = 280
+const MAX_RIGHT    = 640
+const dragRight    = ref(false)
 
-function onDragStart(e: MouseEvent) {
-  dragging.value = true
+// ── 当前拖拽目标 ───────────────────────────────────────────────────────────────
+type DragTarget = 'left' | 'right' | null
+const dragTarget = ref<DragTarget>(null)
+
+function startDrag(target: DragTarget, e: MouseEvent) {
+  dragTarget.value = target
   e.preventDefault()
 }
-function onDragMove(e: MouseEvent) {
-  if (!dragging.value) return
-  const newW = window.innerWidth - e.clientX
-  rightPanelW.value = Math.min(MAX_RIGHT, Math.max(MIN_RIGHT, newW))
+
+function onMouseMove(e: MouseEvent) {
+  if (!dragTarget.value) return
+  if (dragTarget.value === 'left') {
+    // 左侧：鼠标 x 就是宽度
+    const w = e.clientX
+    if (w < MIN_LEFT / 2) {
+      // 拖到很左边 → 收缩
+      leftCollapsed.value = true
+    } else {
+      leftCollapsed.value = false
+      leftW.value = Math.min(MAX_LEFT, Math.max(MIN_LEFT, w))
+    }
+  } else {
+    // 右侧：距右边缘
+    const w = window.innerWidth - e.clientX
+    rightW.value = Math.min(MAX_RIGHT, Math.max(MIN_RIGHT, w))
+  }
 }
-function onDragEnd() { dragging.value = false }
+
+function onMouseUp() { dragTarget.value = null }
 
 onMounted(() => {
   repo.fetchRepos()
-  window.addEventListener('mousemove', onDragMove)
-  window.addEventListener('mouseup',   onDragEnd)
+  window.addEventListener('mousemove', onMouseMove)
+  window.addEventListener('mouseup',   onMouseUp)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('mousemove', onDragMove)
-  window.removeEventListener('mouseup',   onDragEnd)
+  window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('mouseup',   onMouseUp)
 })
 
-// ── Grid columns ──────────────────────────────────────────────────────────────
-const gridCols = computed(() =>
-  sidebarCollapsed.value
-    ? `0px 1fr ${rightPanelW.value}px`
-    : `${SIDEBAR_W}px 1fr ${rightPanelW.value}px`
-)
+// ── Grid columns（收缩时用 COLLAPSED_W 而非 0，保证 toggle 可见）──────────────
+const gridCols = computed(() => {
+  const lw = leftCollapsed.value ? COLLAPSED_W : leftW.value
+  return `${lw}px 1fr ${rightW.value}px`
+})
 
-// ── Nav tabs ─────────────────────────────────────────────────────────────────
+// ── Nav ───────────────────────────────────────────────────────────────────────
 const activeNav = ref('explorer')
 
 function onNavChange(id: string) {
   activeNav.value = id
-  // 历史记录 → 同步右侧 panel 到 history tab
   if (id === 'history') analysis.setTab('history')
+  // 收缩状态下切换 nav 自动展开
+  if (leftCollapsed.value) leftCollapsed.value = false
 }
 
-// ── 打开文件（从 SearchResults 调用，需切回 explorer 让 Monaco 渲染）────────────
-function openFileFromSearch(path: string, lineStart: number, lineEnd: number) {
+function openFileFromSearch() {
   activeNav.value = 'explorer'
 }
 
@@ -78,95 +100,114 @@ const NAV_LABEL: Record<string, string> = {
   bug:      'Bug 扫描',
   history:  '历史记录',
 }
+
+// icon strip 对应 nav id
+const NAV_ICONS = [
+  { id: 'explorer', icon: '◫' },
+  { id: 'search',   icon: '⌕' },
+  // { id: 'bug',      icon: '◉' },
+  // { id: 'history',  icon: '⟲' },
+]
 </script>
 
 <template>
   <div
     class="app-shell"
     :style="{ gridTemplateColumns: gridCols }"
-    :class="{ 'cursor-col-resize select-none': dragging }"
+    :class="{ 'cursor-col-resize select-none': dragTarget }"
   >
-    <!-- Top bar -->
+    <!-- ── Top bar ── -->
     <TopBar class="top-bar-row" />
 
-    <!-- ── Left Sidebar ── -->
-    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
-      <!-- Sidebar toggle button (right edge) -->
-      <button
-        class="sidebar-toggle"
-        :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
-        @click="sidebarCollapsed = !sidebarCollapsed"
-      >
-        {{ sidebarCollapsed ? '›' : '‹' }}
-      </button>
+    <!-- ════════════════ Left Sidebar ════════════════ -->
+    <aside class="sidebar">
 
-      <template v-if="!sidebarCollapsed">
-        <!-- Repo section -->
-        <div class="px-4 pt-3 pb-1.5 flex items-center justify-between">
+      <!-- ① Collapsed state：icon strip + expand toggle -->
+      <template v-if="leftCollapsed">
+        <div class="flex flex-col items-center pt-2 gap-1 w-full">
+          <!-- Expand button (top, always visible) -->
+          <button
+            class="icon-btn text-cyan"
+            title="展开侧边栏"
+            @click="leftCollapsed = false"
+          >›</button>
+          <div class="w-5 border-t border-border-dim my-1" />
+          <!-- Nav icons -->
+          <button
+            v-for="nav in NAV_ICONS" :key="nav.id"
+            class="icon-btn"
+            :class="activeNav === nav.id ? 'text-cyan' : 'text-text-muted hover:text-text-primary'"
+            @click="onNavChange(nav.id)"
+          >{{ nav.icon }}</button>
+        </div>
+      </template>
+
+      <!-- ② Expanded state -->
+      <template v-else>
+        <!-- Header row: label + collapse button -->
+        <div class="px-3 pt-3 pb-1.5 flex items-center justify-between flex-shrink-0">
           <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">
             仓库
           </span>
+          <button
+            class="w-5 h-5 flex items-center justify-center rounded font-mono text-[11px]
+                   text-text-muted hover:text-cyan hover:bg-cyan-dim transition-colors"
+            title="收起侧边栏"
+            @click="leftCollapsed = true"
+          >‹</button>
         </div>
+
         <RepoSelector />
 
-        <div class="border-t border-border-dim my-1" />
+        <div class="border-t border-border-dim my-1 flex-shrink-0" />
 
-        <!-- Nav section label -->
-        <div class="px-4 py-1.5">
+        <div class="px-3 py-1 flex-shrink-0">
           <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">
             {{ NAV_LABEL[activeNav] ?? activeNav }}
           </span>
         </div>
         <SidebarNav :active="activeNav" @change="onNavChange" />
 
-        <div class="border-t border-border-dim mt-1 mb-2" />
+        <div class="border-t border-border-dim mt-1 mb-1 flex-shrink-0" />
 
-        <!-- Scrollable content area, switches by nav -->
+        <!-- Scrollable content -->
         <div class="flex-1 overflow-y-auto min-h-0">
 
-          <!-- 文件资源 -->
           <template v-if="activeNav === 'explorer'">
-            <div
-              v-if="!repo.fileTree.length && repo.currentRepo"
-              class="px-4 py-3 font-mono text-[11px] text-text-muted"
-            >
-              文件树加载中...
-            </div>
-            <div
-              v-else-if="!repo.currentRepo"
-              class="px-4 py-3 font-mono text-[11px] text-text-muted"
-            >
+            <div v-if="!repo.currentRepo"
+              class="px-4 py-3 font-mono text-[11px] text-text-muted">
               请先添加仓库
             </div>
+            <div v-else-if="!repo.fileTree.length"
+              class="px-4 py-3 font-mono text-[11px] text-text-muted animate-pulse">
+              文件树加载中...
+            </div>
             <FileTree v-else :nodes="repo.fileTree" />
-            <!-- 索引进度条 -->
             <div
               v-if="repo.indexing && repo.indexProgress"
               class="mx-3 mb-2 px-3 py-2 rounded-md bg-amber/10 border border-amber/20
                      font-mono text-[11px] text-amber flex items-center gap-2"
             >
-              <span class="animate-spin-slow inline-block flex-shrink-0">⟳</span>
+              <span class="animate-spin-slow flex-shrink-0">⟳</span>
               <span class="truncate">{{ repo.indexProgress.message }}</span>
             </div>
           </template>
 
-          <!-- 搜索结果 (侧边栏模式，较紧凑) -->
           <template v-else-if="activeNav === 'search'">
             <SearchResults compact @open-file="openFileFromSearch" />
           </template>
 
-          <!-- Bug 扫描占位 -->
           <template v-else-if="activeNav === 'bug'">
             <div class="p-4 flex flex-col gap-3">
-              <div class="font-mono text-[11px] text-text-muted leading-relaxed">
-                选择文件后点击工具栏「Bug」按钮，或在此处一键扫描整个仓库。
-              </div>
+              <p class="font-mono text-[11px] text-text-muted leading-relaxed">
+                选择文件后点击工具栏「Bug」按钮分析当前文件。
+              </p>
               <button
-                class="flex items-center justify-center gap-2 py-2.5 rounded-lg font-mono text-[12px]
-                       font-semibold border border-red-accent/40 text-red-accent
-                       hover:bg-red-accent/10 transition-colors"
+                class="py-2.5 rounded-lg font-mono text-[12px] font-semibold
+                       border border-red-accent/40 text-red-accent hover:bg-red-accent/10
+                       transition-colors flex items-center justify-center gap-2"
                 :disabled="!repo.isIndexDone"
-                :class="!repo.isIndexDone ? 'opacity-40 cursor-not-allowed' : ''"
+                :class="{ 'opacity-40 cursor-not-allowed': !repo.isIndexDone }"
                 @click="analysis.setTab('bug')"
               >
                 <span>◉</span> 打开 Bug 检测面板
@@ -174,7 +215,6 @@ const NAV_LABEL: Record<string, string> = {
             </div>
           </template>
 
-          <!-- 历史记录 -->
           <template v-else-if="activeNav === 'history'">
             <TabHistory />
           </template>
@@ -182,38 +222,33 @@ const NAV_LABEL: Record<string, string> = {
         </div>
       </template>
 
-      <!-- Collapsed icon strip -->
-      <template v-else>
-        <div class="flex flex-col items-center gap-3 pt-4">
-          <button
-            v-for="item in ['◫','⌕','◉','⟲']" :key="item"
-            class="w-8 h-8 flex items-center justify-center rounded text-text-muted
-                   hover:bg-bg-hover hover:text-text-primary transition-colors font-mono text-sm"
-            @click="sidebarCollapsed = false"
-          >{{ item }}</button>
-        </div>
-      </template>
+      <!-- Left resize handle（固定在 sidebar 右边缘，始终渲染）-->
+      <div
+        v-if="!leftCollapsed"
+        class="left-drag-handle"
+        :class="{ active: dragTarget === 'left' }"
+        @mousedown="startDrag('left', $event)"
+      />
     </aside>
 
-    <!-- ── Main Content ── -->
+    <!-- ════════════════ Main Content ════════════════ -->
     <main class="main-content">
       <SearchPanel />
       <div class="flex-1 flex flex-col overflow-hidden">
-        <!-- Always render CodeViewer so Monaco stays mounted -->
         <CodeToolbar />
         <CodeViewer />
       </div>
     </main>
 
-    <!-- ── Right drag handle ── -->
+    <!-- Right drag handle -->
     <div
-      class="drag-handle"
-      :class="{ active: dragging }"
-      @mousedown="onDragStart"
+      class="right-drag-handle"
+      :class="{ active: dragTarget === 'right' }"
+      @mousedown="startDrag('right', $event)"
     />
 
-    <!-- ── Right Analysis Panel ── -->
-    <AnalysisPanel :style="{ width: rightPanelW + 'px' }" />
+    <!-- ════════════════ Right Analysis Panel ════════════════ -->
+    <AnalysisPanel />
 
     <!-- ── Status Bar ── -->
     <StatusBar />
@@ -227,7 +262,7 @@ const NAV_LABEL: Record<string, string> = {
   height: 100vh;
   position: relative;
   z-index: 1;
-  transition: grid-template-columns 0.2s ease;
+  /* 不加 transition，拖拽时需要即时响应 */
 }
 
 .top-bar-row {
@@ -235,72 +270,71 @@ const NAV_LABEL: Record<string, string> = {
   grid-row: 1;
 }
 
-/* sidebar */
+/* ── Left Sidebar ── */
 .sidebar {
   grid-column: 1;
   grid-row: 2;
   position: relative;
   @apply flex flex-col bg-bg-base border-r border-border-dim overflow-hidden;
-  transition: width 0.2s ease;
-}
-.sidebar.collapsed {
-  @apply border-r border-border-dim;
+  /* overflow: visible 让 drag handle 超出边界可点击 */
+  overflow: visible;
 }
 
-/* toggle button: sits on the right edge of sidebar */
-.sidebar-toggle {
+/* icon button in collapsed strip */
+.icon-btn {
+  @apply w-8 h-8 flex items-center justify-center rounded
+         font-mono text-[13px] transition-colors;
+}
+.icon-btn:hover {
+  @apply bg-bg-hover text-text-primary;
+}
+
+/* Left sidebar resize handle */
+.left-drag-handle {
   position: absolute;
-  right: -12px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 20;
-  width: 20px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #141d33;
-  border: 1px solid #1c2a4a;
-  border-radius: 0 6px 6px 0;
-  color: #556a8e;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 25;
+  background: transparent;
+  transition: background 0.15s;
 }
-.sidebar-toggle:hover {
-  color: #00d4ff;
-  background: #0f1628;
+.left-drag-handle:hover,
+.left-drag-handle.active {
+  background: rgba(0, 212, 255, 0.25);
 }
 
+/* ── Main Content ── */
 .main-content {
   grid-column: 2;
   grid-row: 2;
   @apply flex flex-col overflow-hidden bg-bg-deep;
 }
 
-/* drag handle — right edge of main content = window.width - rightPanelW */
-.drag-handle {
+/* ── Right drag handle（fixed，跟随 rightW）── */
+.right-drag-handle {
   position: fixed;
   top: 52px;
   bottom: 28px;
-  right: v-bind('rightPanelW + "px"');
-  width: 5px;
+  right: v-bind('rightW + "px"');
+  width: 6px;
+  transform: translateX(50%);
   cursor: col-resize;
   background: transparent;
   transition: background 0.15s;
   z-index: 30;
-  transform: translateX(50%);
 }
-.drag-handle:hover,
-.drag-handle.active {
-  background: rgba(0, 212, 255, 0.3);
+.right-drag-handle:hover,
+.right-drag-handle.active {
+  background: rgba(0, 212, 255, 0.25);
 }
 
+/* ── Analysis Panel ── */
 :deep(.analysis-panel) {
   grid-column: 3;
   grid-row: 2;
-  min-width: v-bind('MIN_RIGHT + "px"');
-  max-width: v-bind('MAX_RIGHT + "px"');
 }
 
 :deep(.status-bar) {

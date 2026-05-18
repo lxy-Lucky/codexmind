@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRepoStore }     from '@/stores/repoStore'
-import { useSearchStore }   from '@/stores/searchStore'
 import { useAnalysisStore } from '@/stores/analysisStore'
 
 import TopBar        from '@/components/layout/TopBar.vue'
@@ -17,7 +16,6 @@ import AnalysisPanel from '@/components/analysis/AnalysisPanel.vue'
 import TabHistory    from '@/components/analysis/tabs/TabHistory.vue'
 
 const repo     = useRepoStore()
-const search   = useSearchStore()
 const analysis = useAnalysisStore()
 
 // ── Left sidebar ──────────────────────────────────────────────────────────────
@@ -25,16 +23,14 @@ const leftW         = ref(260)
 const leftCollapsed = ref(false)
 const MIN_LEFT      = 180
 const MAX_LEFT      = 480
-const COLLAPSED_W   = 40          // icon-strip 宽度，始终可见
-const dragLeft      = ref(false)
+const COLLAPSED_W   = 40
 
 // ── Right panel ───────────────────────────────────────────────────────────────
-const rightW       = ref(380)
-const MIN_RIGHT    = 280
-const MAX_RIGHT    = 640
-const dragRight    = ref(false)
+const rightW    = ref(380)
+const MIN_RIGHT = 280
+const MAX_RIGHT = 640
 
-// ── 当前拖拽目标 ───────────────────────────────────────────────────────────────
+// ── Drag ─────────────────────────────────────────────────────────────────────
 type DragTarget = 'left' | 'right' | null
 const dragTarget = ref<DragTarget>(null)
 
@@ -42,43 +38,41 @@ function startDrag(target: DragTarget, e: MouseEvent) {
   dragTarget.value = target
   e.preventDefault()
 }
-
 function onMouseMove(e: MouseEvent) {
   if (!dragTarget.value) return
   if (dragTarget.value === 'left') {
-    // 左侧：鼠标 x 就是宽度
     const w = e.clientX
     if (w < MIN_LEFT / 2) {
-      // 拖到很左边 → 收缩
       leftCollapsed.value = true
     } else {
       leftCollapsed.value = false
       leftW.value = Math.min(MAX_LEFT, Math.max(MIN_LEFT, w))
     }
   } else {
-    // 右侧：距右边缘
-    const w = window.innerWidth - e.clientX
-    rightW.value = Math.min(MAX_RIGHT, Math.max(MIN_RIGHT, w))
+    rightW.value = Math.min(MAX_RIGHT, Math.max(MIN_RIGHT, window.innerWidth - e.clientX))
   }
 }
-
 function onMouseUp() { dragTarget.value = null }
 
 onMounted(() => {
   repo.fetchRepos()
   window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup',   onMouseUp)
+  window.addEventListener('mouseup', onMouseUp)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('mousemove', onMouseMove)
-  window.removeEventListener('mouseup',   onMouseUp)
+  window.removeEventListener('mouseup', onMouseUp)
 })
 
-// ── Grid columns（收缩时用 COLLAPSED_W 而非 0，保证 toggle 可见）──────────────
+// ── Grid ─────────────────────────────────────────────────────────────────────
 const gridCols = computed(() => {
   const lw = leftCollapsed.value ? COLLAPSED_W : leftW.value
   return `${lw}px 1fr ${rightW.value}px`
 })
+
+// v-bind CSS 变量：drag handle 定位用
+const leftHandlePos  = computed(() => (leftCollapsed.value ? COLLAPSED_W : leftW.value) + 'px')
+const rightHandlePos = computed(() => rightW.value + 'px')
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
 const activeNav = ref('explorer')
@@ -86,10 +80,16 @@ const activeNav = ref('explorer')
 function onNavChange(id: string) {
   activeNav.value = id
   if (id === 'history') analysis.setTab('history')
-  // 收缩状态下切换 nav 自动展开
   if (leftCollapsed.value) leftCollapsed.value = false
 }
 
+// 搜索完成 → 自动切到搜索结果视图
+function onSearched() {
+  activeNav.value = 'search'
+  if (leftCollapsed.value) leftCollapsed.value = false
+}
+
+// 从搜索结果点「打开文件」→ 切回文件编辑视图
 function openFileFromSearch() {
   activeNav.value = 'explorer'
 }
@@ -97,11 +97,10 @@ function openFileFromSearch() {
 const NAV_LABEL: Record<string, string> = {
   explorer: '文件资源',
   search:   '搜索结果',
-  bug:      'Bug 扫描',
-  history:  '历史记录',
+  // bug:      'Bug 扫描',
+  // history:  '历史记录',
 }
 
-// icon strip 对应 nav id
 const NAV_ICONS = [
   { id: 'explorer', icon: '◫' },
   { id: 'search',   icon: '⌕' },
@@ -116,23 +115,18 @@ const NAV_ICONS = [
     :style="{ gridTemplateColumns: gridCols }"
     :class="{ 'cursor-col-resize select-none': dragTarget }"
   >
-    <!-- ── Top bar ── -->
+    <!-- Top bar -->
     <TopBar class="top-bar-row" />
 
-    <!-- ════════════════ Left Sidebar ════════════════ -->
+    <!-- ════ Left Sidebar ════ -->
     <aside class="sidebar">
 
-      <!-- ① Collapsed state：icon strip + expand toggle -->
+      <!-- Collapsed: icon strip -->
       <template v-if="leftCollapsed">
-        <div class="flex flex-col items-center pt-2 gap-1 w-full">
-          <!-- Expand button (top, always visible) -->
-          <button
-            class="icon-btn text-cyan"
-            title="展开侧边栏"
-            @click="leftCollapsed = false"
-          >›</button>
+        <div class="flex flex-col items-center pt-2 gap-1 w-full overflow-hidden">
+          <button class="icon-btn text-cyan" title="展开侧边栏"
+            @click="leftCollapsed = false">›</button>
           <div class="w-5 border-t border-border-dim my-1" />
-          <!-- Nav icons -->
           <button
             v-for="nav in NAV_ICONS" :key="nav.id"
             class="icon-btn"
@@ -142,13 +136,11 @@ const NAV_ICONS = [
         </div>
       </template>
 
-      <!-- ② Expanded state -->
+      <!-- Expanded -->
       <template v-else>
-        <!-- Header row: label + collapse button -->
-        <div class="px-3 pt-3 pb-1.5 flex items-center justify-between flex-shrink-0">
-          <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-            仓库
-          </span>
+        <!-- Section: Repo -->
+        <div class="px-3 pt-3 pb-1 flex items-center justify-between flex-shrink-0">
+          <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">仓库</span>
           <button
             class="w-5 h-5 flex items-center justify-center rounded font-mono text-[11px]
                    text-text-muted hover:text-cyan hover:bg-cyan-dim transition-colors"
@@ -157,22 +149,29 @@ const NAV_ICONS = [
           >‹</button>
         </div>
 
-        <RepoSelector />
+        <!-- overflow-hidden here keeps repo list from blowing out -->
+        <div class="flex-shrink-0 overflow-hidden">
+          <RepoSelector />
+        </div>
 
         <div class="border-t border-border-dim my-1 flex-shrink-0" />
 
+        <!-- Section: Nav -->
         <div class="px-3 py-1 flex-shrink-0">
           <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">
             {{ NAV_LABEL[activeNav] ?? activeNav }}
           </span>
         </div>
-        <SidebarNav :active="activeNav" @change="onNavChange" />
+        <div class="flex-shrink-0">
+          <SidebarNav :active="activeNav" @change="onNavChange" />
+        </div>
 
-        <div class="border-t border-border-dim mt-1 mb-1 flex-shrink-0" />
+        <div class="border-t border-border-dim mt-1 flex-shrink-0" />
 
-        <!-- Scrollable content -->
-        <div class="flex-1 overflow-y-auto min-h-0">
+        <!-- Scrollable content — KEY: overflow-y-auto + min-h-0 -->
+        <div class="flex-1 overflow-y-auto overflow-x-auto min-h-0 min-w-0">
 
+          <!-- 文件资源 -->
           <template v-if="activeNav === 'explorer'">
             <div v-if="!repo.currentRepo"
               class="px-4 py-3 font-mono text-[11px] text-text-muted">
@@ -182,10 +181,13 @@ const NAV_ICONS = [
               class="px-4 py-3 font-mono text-[11px] text-text-muted animate-pulse">
               文件树加载中...
             </div>
-            <FileTree v-else :nodes="repo.fileTree" />
+            <!-- FileTree needs min-width so horizontal scroll works -->
+            <div v-else class="min-w-max">
+              <FileTree :nodes="repo.fileTree" />
+            </div>
             <div
               v-if="repo.indexing && repo.indexProgress"
-              class="mx-3 mb-2 px-3 py-2 rounded-md bg-amber/10 border border-amber/20
+              class="mx-3 my-2 px-3 py-2 rounded-md bg-amber/10 border border-amber/20
                      font-mono text-[11px] text-amber flex items-center gap-2"
             >
               <span class="animate-spin-slow flex-shrink-0">⟳</span>
@@ -193,10 +195,12 @@ const NAV_ICONS = [
             </div>
           </template>
 
+          <!-- 搜索结果 -->
           <template v-else-if="activeNav === 'search'">
             <SearchResults compact @open-file="openFileFromSearch" />
           </template>
 
+          <!-- Bug 扫描 -->
           <template v-else-if="activeNav === 'bug'">
             <div class="p-4 flex flex-col gap-3">
               <p class="font-mono text-[11px] text-text-muted leading-relaxed">
@@ -215,6 +219,7 @@ const NAV_ICONS = [
             </div>
           </template>
 
+          <!-- 历史记录 -->
           <template v-else-if="activeNav === 'history'">
             <TabHistory />
           </template>
@@ -222,18 +227,18 @@ const NAV_ICONS = [
         </div>
       </template>
 
-      <!-- Left resize handle（固定在 sidebar 右边缘，始终渲染）-->
+      <!-- Left drag handle: fixed，脱离 sidebar overflow -->
       <div
-        v-if="!leftCollapsed"
         class="left-drag-handle"
         :class="{ active: dragTarget === 'left' }"
         @mousedown="startDrag('left', $event)"
       />
     </aside>
 
-    <!-- ════════════════ Main Content ════════════════ -->
+    <!-- ════ Main Content ════ -->
     <main class="main-content">
-      <SearchPanel />
+      <!-- 监听 searched 事件，自动切搜索结果视图 -->
+      <SearchPanel @searched="onSearched" />
       <div class="flex-1 flex flex-col overflow-hidden">
         <CodeToolbar />
         <CodeViewer />
@@ -247,10 +252,10 @@ const NAV_ICONS = [
       @mousedown="startDrag('right', $event)"
     />
 
-    <!-- ════════════════ Right Analysis Panel ════════════════ -->
+    <!-- ════ Right Analysis Panel ════ -->
     <AnalysisPanel />
 
-    <!-- ── Status Bar ── -->
+    <!-- Status Bar -->
     <StatusBar />
   </div>
 </template>
@@ -262,7 +267,6 @@ const NAV_ICONS = [
   height: 100vh;
   position: relative;
   z-index: 1;
-  /* 不加 transition，拖拽时需要即时响应 */
 }
 
 .top-bar-row {
@@ -275,27 +279,23 @@ const NAV_ICONS = [
   grid-column: 1;
   grid-row: 2;
   position: relative;
+  /* overflow: hidden — 恢复正常，滚动由内层 flex-1 子容器负责 */
   @apply flex flex-col bg-bg-base border-r border-border-dim overflow-hidden;
-  /* overflow: visible 让 drag handle 超出边界可点击 */
-  overflow: visible;
 }
 
-/* icon button in collapsed strip */
 .icon-btn {
-  @apply w-8 h-8 flex items-center justify-center rounded
-         font-mono text-[13px] transition-colors;
+  @apply w-8 h-8 flex items-center justify-center rounded font-mono text-[13px] transition-colors;
 }
-.icon-btn:hover {
-  @apply bg-bg-hover text-text-primary;
-}
+.icon-btn:hover { @apply bg-bg-hover text-text-primary; }
 
-/* Left sidebar resize handle */
+/* fixed 定位，完全脱离 sidebar 的 overflow:hidden 裁剪 */
 .left-drag-handle {
-  position: absolute;
-  top: 0;
-  right: -3px;
-  bottom: 0;
+  position: fixed;
+  top: 52px;
+  bottom: 28px;
+  left: v-bind(leftHandlePos);
   width: 6px;
+  transform: translateX(-50%);
   cursor: col-resize;
   z-index: 25;
   background: transparent;
@@ -313,12 +313,12 @@ const NAV_ICONS = [
   @apply flex flex-col overflow-hidden bg-bg-deep;
 }
 
-/* ── Right drag handle（fixed，跟随 rightW）── */
+/* ── Right drag handle ── */
 .right-drag-handle {
   position: fixed;
   top: 52px;
   bottom: 28px;
-  right: v-bind('rightW + "px"');
+  right: v-bind(rightHandlePos);
   width: 6px;
   transform: translateX(50%);
   cursor: col-resize;

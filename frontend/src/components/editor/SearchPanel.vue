@@ -58,7 +58,7 @@ function fillHint(hint: string) {
         <textarea
           v-model="search.query"
           :placeholder="`输入 ${tabs.find(t => t.id === search.mode)?.label} 问题...`"
-          rows="2"
+          rows="1"
           class="w-full bg-bg-surface border border-border-dim rounded-lg px-4 py-3
                  font-mono text-[13px] text-text-primary placeholder-text-muted outline-none
                  resize-none leading-relaxed transition-all

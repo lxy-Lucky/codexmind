@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #app {
+  height: 100%;
+  overflow: hidden;
+  background: #06090f;
+  color: #e4eaf6;
+  font-family: 'Source Serif 4', serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ── Background texture ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    radial-gradient(ellipse at 15% 20%, rgba(0,212,255,0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 80%, rgba(165,94,234,0.02) 0%, transparent 50%);
+  pointer-events: none; z-index: 0;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1c2a4a; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #263758; }
+
+/* ── Animations ── */
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-pulse-dot { animation: pulse 2s ease-in-out infinite; }
+.animate-fade-in   { animation: fadeIn 0.25s ease-out forwards; }
+.animate-spin-slow { animation: spin 1.2s linear infinite; }
+
+/* ── Streaming skeleton ── */
+.streaming-cursor::after {
+  content: '▋';
+  color: #00d4ff;
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+/* ── Prose overrides for dark theme ── */
+.prose-dark {
+  --tw-prose-body: #c8d6f0;
+  --tw-prose-headings: #e4eaf6;
+  --tw-prose-code: #00d4ff;
+  --tw-prose-pre-bg: #0f1628;
+  --tw-prose-bold: #e4eaf6;
+  color: #c8d6f0;
+}
+.prose-dark code { background: #1a2540; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+.prose-dark pre  { background: #0f1628; border: 1px solid #1c2a4a; border-radius: 8px; }
+.prose-dark h1,.prose-dark h2,.prose-dark h3 { color: #e4eaf6; font-family: 'JetBrains Mono',monospace; }
+
+/* ── Monaco fix ── */
+.monaco-editor, .monaco-editor-background, .monaco-editor .margin {
+  background-color: #06090f !important;
+}

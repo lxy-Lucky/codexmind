@@ -30,9 +30,9 @@ async def semantic_search(req: SearchRequest) -> SearchResponse:
             )]
         )
 
-    hits = await client.search(
+    res = await client.query_points(
         collection_name=col,
-        query_vector=query_vec,
+        query=query_vec,
         limit=req.top_k,
         query_filter=query_filter,
         with_payload=True,
@@ -43,12 +43,12 @@ async def semantic_search(req: SearchRequest) -> SearchResponse:
             file_path  = h.payload["file_path"],
             line_start = h.payload["line_start"],
             line_end   = h.payload["line_end"],
-            snippet    = h.payload.get("text", ""),   # 若存了原文可直接用
+            snippet    = h.payload.get("text", ""),
             score      = round(h.score, 4),
             language   = h.payload.get("language", ""),
             chunk_type = h.payload.get("chunk_type", "block"),
         )
-        for h in hits
+        for h in res.points
     ]
 
     latency_ms = int((time.monotonic() - t0) * 1000)

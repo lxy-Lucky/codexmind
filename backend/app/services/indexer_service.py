@@ -79,6 +79,7 @@ async def run_index(repo_id: str, root_path: str, db) -> None:
                     "language":   language,
                     "chunk_type": chunk["chunk_type"],
                     "symbol":     chunk.get("symbol", ""),
+                    "text":       chunk["text"][:800],  # 存前 800 字符作为 snippet
                 })
                 total_chunks += 1
 

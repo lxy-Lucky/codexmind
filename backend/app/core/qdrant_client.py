@@ -79,7 +79,7 @@ async def collection_info(repo_id: str) -> dict:
     name = collection_name(repo_id)
     info = await client.get_collection(collection_name=name)
     return {
-        "vectors_count": info.vectors_count,
-        "indexed_vectors_count": info.indexed_vectors_count,
+        "vectors_count": info.points_count or 0,
+        "indexed_vectors_count": info.indexed_vectors_count or 0,
         "status": info.status.value,
     }

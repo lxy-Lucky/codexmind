@@ -47,7 +47,7 @@ function submit() {
     <!-- Input row -->
     <div class="flex gap-2.5 items-start">
       <div class="flex-1">
-        <textarea
+        <input
           v-model="search.query"
           :placeholder="`输入${tabs.find(t=>t.id===search.mode)?.label}问题...`"
           rows="2"

@@ -6,8 +6,8 @@ type NavItem = { id: string; icon: string; label: string }
 const navItems: NavItem[] = [
   { id: 'explorer', icon: '◫', label: '文件资源' },
   { id: 'search',   icon: '⌕', label: '语义搜索' },
-  { id: 'bug',      icon: '◉', label: 'Bug 扫描' },
-  { id: 'history',  icon: '⟲', label: '历史记录' },
+  // { id: 'bug',      icon: '◉', label: 'Bug 扫描' },
+  // { id: 'history',  icon: '⟲', label: '历史记录' },
 ]
 </script>
 

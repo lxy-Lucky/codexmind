@@ -25,29 +25,29 @@ function onGlobalSearch(e: KeyboardEvent) {
       <div class="brand-icon">Cx</div>
       <span class="font-display text-lg text-text-primary tracking-wide">CodexMind</span>
       <span class="font-mono text-[10px] text-text-muted bg-bg-surface border border-border-dim px-2 py-0.5 rounded-full ml-1">
-        BETA
+        DEV
       </span>
     </div>
 
     <!-- Global Search -->
-    <div class="flex-1 flex justify-center px-6">
-      <div class="relative w-[520px] max-w-full">
-        <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted text-sm pointer-events-none">⌕</span>
-        <input
-          v-model="globalQ"
-          type="text"
-          placeholder="搜索代码... (⌘K)"
-          class="w-full bg-bg-surface border border-border-dim rounded-full py-2 pl-9 pr-16
-                 font-mono text-[13px] text-text-primary placeholder-text-muted outline-none
-                 transition-all focus:border-cyan focus:shadow-[0_0_0_3px_rgba(0,212,255,0.12)]"
-          @keydown="onGlobalSearch"
-        />
-        <div class="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">
-          <kbd class="font-mono text-[10px] text-text-muted bg-bg-elevated border border-border-dim px-1.5 py-0.5 rounded">⌘</kbd>
-          <kbd class="font-mono text-[10px] text-text-muted bg-bg-elevated border border-border-dim px-1.5 py-0.5 rounded">K</kbd>
-        </div>
-      </div>
-    </div>
+<!--    <div class="flex-1 flex justify-center px-6">-->
+<!--      <div class="relative w-[520px] max-w-full">-->
+<!--        <span class="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted text-sm pointer-events-none">⌕</span>-->
+<!--        <input-->
+<!--          v-model="globalQ"-->
+<!--          type="text"-->
+<!--          placeholder="搜索代码... "-->
+<!--          class="w-full bg-bg-surface border border-border-dim rounded-full py-2 pl-9 pr-16-->
+<!--                 font-mono text-[13px] text-text-primary placeholder-text-muted outline-none-->
+<!--                 transition-all focus:border-cyan focus:shadow-[0_0_0_3px_rgba(0,212,255,0.12)]"-->
+<!--          @keydown="onGlobalSearch"-->
+<!--        />-->
+<!--        <div class="absolute right-3 top-1/2 -translate-y-1/2 flex gap-1">-->
+<!--          <kbd class="font-mono text-[10px] text-text-muted bg-bg-elevated border border-border-dim px-1.5 py-0.5 rounded">⌘</kbd>-->
+<!--          <kbd class="font-mono text-[10px] text-text-muted bg-bg-elevated border border-border-dim px-1.5 py-0.5 rounded">K</kbd>-->
+<!--        </div>-->
+<!--      </div>-->
+<!--    </div>-->
 
     <!-- Right -->
     <div class="flex items-center gap-4">

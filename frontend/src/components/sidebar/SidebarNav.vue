@@ -1,26 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useSearchStore } from '@/stores/searchStore'
-import { useRepoStore } from '@/stores/repoStore'
-
-type NavItem = { id: string; icon: string; label: string; badge?: string | number }
+defineProps<{ active: string }>()
 const emit = defineEmits<{ (e: 'change', id: string): void }>()
 
-const active = ref('explorer')
-const search = useSearchStore()
-const repo   = useRepoStore()
-
+type NavItem = { id: string; icon: string; label: string }
 const navItems: NavItem[] = [
   { id: 'explorer', icon: '◫', label: '文件资源' },
   { id: 'search',   icon: '⌕', label: '语义搜索' },
   { id: 'bug',      icon: '◉', label: 'Bug 扫描' },
   { id: 'history',  icon: '⟲', label: '历史记录' },
 ]
-
-function select(id: string) {
-  active.value = id
-  emit('change', id)
-}
 </script>
 
 <template>
@@ -30,17 +18,10 @@ function select(id: string) {
       :key="item.id"
       class="nav-item"
       :class="active === item.id ? 'active' : ''"
-      @click="select(item.id)"
+      @click="emit('change', item.id)"
     >
-      <span class="w-5 text-center text-[13px] opacity-70">{{ item.icon }}</span>
+      <span class="w-5 text-center text-[13px]">{{ item.icon }}</span>
       <span class="font-mono text-[12px]">{{ item.label }}</span>
-      <span
-        v-if="item.id === 'search' && search.results.length"
-        class="ml-auto font-mono text-[10px] px-1.5 h-[18px] leading-[18px] rounded-full
-               bg-green-accent/10 text-green-accent"
-      >
-        {{ search.results.length }}
-      </span>
     </button>
   </nav>
 </template>
@@ -51,5 +32,4 @@ function select(id: string) {
 }
 .nav-item:hover { @apply bg-bg-hover text-text-primary; }
 .nav-item.active { @apply bg-cyan-dim text-cyan; }
-.nav-item.active span { opacity: 1; }
 </style>

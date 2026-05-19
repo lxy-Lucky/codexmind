@@ -8,7 +8,7 @@ from typing import AsyncIterator
 import ollama
 
 from app.core.config import settings
-from app.models.analysis import AnalysisRequest, AnalysisDoneEvent
+from app.models.analysis import AnalysisRequest, AnalysisDoneEvent, ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -77,19 +77,36 @@ _PROMPTS = {
 {code}
 ```
 """,
+
+    # custom 模式的系统提示：注入代码上下文，用户问题单独在 messages 里
+    "custom_system": """\
+你是一位专业的代码助手，擅长分析、解释、优化各类编程语言的代码。
+请根据用户的问题，结合以下代码上下文进行回答，用**中文**输出，支持 Markdown 格式。
+
+代码上下文：
+文件：`{file_path}`（第 {line_start}-{line_end} 行）
+
+```{language}
+{code}
+```
+""",
 }
 
 
-def _build_prompt(req: AnalysisRequest) -> str:
-    template = _PROMPTS.get(req.mode, _PROMPTS["summary"])
-    # 推断语言（简单从文件扩展名）
-    ext = req.file_path.rsplit(".", 1)[-1] if "." in req.file_path else "text"
-    ext_lang_map = {
+def _ext_to_lang(file_path: str) -> str:
+    ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else "text"
+    return {
         "java": "java", "py": "python", "ts": "typescript",
         "js": "javascript", "go": "go", "kt": "kotlin",
         "rs": "rust", "cpp": "cpp", "cs": "csharp",
-    }
-    language = ext_lang_map.get(ext, ext)
+        "vue": "vue", "sql": "sql", "sh": "bash",
+    }.get(ext, ext)
+
+
+def _build_prompt(req: AnalysisRequest) -> str:
+    """summary / bug / deps 模式：单轮 prompt"""
+    template = _PROMPTS.get(req.mode, _PROMPTS["summary"])
+    language = _ext_to_lang(req.file_path)
     return template.format(
         file_path  = req.file_path,
         line_start = req.line_start,
@@ -99,74 +116,94 @@ def _build_prompt(req: AnalysisRequest) -> str:
     )
 
 
+def _build_chat_messages(
+    req: AnalysisRequest,
+    history: list[ChatMessage],
+) -> list[dict]:
+    """
+    custom 模式：构造多轮对话 messages。
+    结构：
+      system: 代码上下文
+      [历史 user/assistant 消息...]
+      user: 本次用户问题
+    """
+    language = _ext_to_lang(req.file_path)
+    system_content = _PROMPTS["custom_system"].format(
+        file_path  = req.file_path,
+        line_start = req.line_start,
+        line_end   = req.line_end,
+        language   = language,
+        code       = req.code,
+    )
+
+    messages: list[dict] = [{"role": "system", "content": system_content}]
+
+    # 历史记录（最多保留最近 10 轮，避免 context 超限）
+    for msg in history[-20:]:
+        messages.append({"role": msg.role, "content": msg.content})
+
+    # 本次用户问题
+    messages.append({"role": "user", "content": req.custom_prompt or ""})
+
+    return messages
+
+
 # ── SSE 生成器 ────────────────────────────────────────────────────────────────
 
-async def stream_analysis(req: AnalysisRequest) -> AsyncIterator[str]:
+async def stream_analysis(
+    req: AnalysisRequest,
+    history: list[ChatMessage] | None = None,
+) -> AsyncIterator[str]:
     """
-    yield SSE 格式的字符串：
-      data: {"text": "..."}\\n\\n
-      ...
-      data: {"done": true, "confidence": 0.9, "latency_ms": 1200}\\n\\n
+    yield SSE：
+      data: {"text": "..."}\n\n
+      data: {"done": true, "confidence": 0.9, "latency_ms": 1200}\n\n
     """
-    prompt = _build_prompt(req)
     t0 = time.monotonic()
-    full_text = []
+    full_text: list[str] = []
+
+    # 构造 messages
+    if req.mode == "custom":
+        messages = _build_chat_messages(req, history or [])
+    else:
+        messages = [{"role": "user", "content": _build_prompt(req)}]
 
     try:
         client = ollama.AsyncClient(host=settings.OLLAMA_HOST)
         stream = await client.chat(
-            model   = settings.OLLAMA_MODEL,
-            messages= [{"role": "user", "content": prompt}],
-            stream  = True,
-            options = {"num_ctx": 8192},
+            model    = settings.OLLAMA_MODEL,
+            messages = messages,
+            stream   = True,
+            options  = {"num_ctx": 8192},
         )
 
         async for chunk in stream:
             token = chunk["message"]["content"]
             if token:
                 full_text.append(token)
-                payload = json.dumps({"text": token}, ensure_ascii=False)
-                yield f"data: {payload}\n\n"
+                yield f"data: {json.dumps({'text': token}, ensure_ascii=False)}\n\n"
 
     except Exception as e:
         logger.exception("LLM stream error: %s", e)
-        err = json.dumps({"error": str(e)}, ensure_ascii=False)
-        yield f"data: {err}\n\n"
+        yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
         return
 
     latency_ms = int((time.monotonic() - t0) * 1000)
     confidence = _estimate_confidence(req.mode, "".join(full_text))
 
-    done_event = AnalysisDoneEvent(
-        confidence = confidence,
-        latency_ms = latency_ms,
-        mode       = req.mode,
-    )
-    done_payload = json.dumps(
-        {"done": True, **done_event.model_dump()},
-        ensure_ascii=False,
-    )
-    yield f"data: {done_payload}\n\n"
+    done = AnalysisDoneEvent(confidence=confidence, latency_ms=latency_ms, mode=req.mode)
+    yield f"data: {json.dumps({'done': True, **done.model_dump()}, ensure_ascii=False)}\n\n"
     logger.info("Analysis done [%s] mode=%s latency=%dms", req.repo_id, req.mode, latency_ms)
 
 
 def _estimate_confidence(mode: str, output: str) -> float:
-    """
-    简单的置信度启发：
-    - bug 模式：输出能解析为有效 JSON 数组 → 高
-    - 其他：按输出长度打分，有代码引用 → 加分
-    """
     if mode == "bug":
         try:
             parsed = json.loads(output.strip())
-            if isinstance(parsed, list) and len(parsed) > 0:
-                return 0.95
-            return 0.75
+            return 0.95 if isinstance(parsed, list) and parsed else 0.75
         except Exception:
             return 0.50
-
-    length = len(output)
-    score = min(0.95, 0.60 + length / 3000)
+    score = min(0.95, 0.60 + len(output) / 3000)
     if "```" in output:
         score = min(0.97, score + 0.05)
     return round(score, 2)

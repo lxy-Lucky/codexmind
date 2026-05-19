@@ -1,6 +1,6 @@
 // ── Repo ─────────────────────────────────────────────────────────────────────
 
-export type IndexStatus = 0 | 1 | 2 | 3  // PENDING | RUNNING | DONE | FAILED
+export type IndexStatus = 0 | 1 | 2 | 3
 
 export interface Repo {
   id: string
@@ -87,7 +87,7 @@ export interface QueryHistory {
 
 // ── Analysis ──────────────────────────────────────────────────────────────────
 
-export type AnalysisMode = 'summary' | 'bug' | 'deps'
+export type AnalysisMode = 'summary' | 'bug' | 'deps' | 'custom'
 
 export interface AnalysisRequest {
   repo_id: string
@@ -96,6 +96,7 @@ export interface AnalysisRequest {
   line_end: number
   code: string
   mode: AnalysisMode
+  custom_prompt?: string
 }
 
 export interface BugItem {
@@ -114,6 +115,16 @@ export interface SSEChunk {
   latency_ms?: number
   mode?: string
   error?: string
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+  streaming?: boolean   // assistant 消息流式输出中
+  error?: boolean
 }
 
 // ── System Status ─────────────────────────────────────────────────────────────

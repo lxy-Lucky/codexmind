@@ -42,34 +42,75 @@ RRF_K = 60   # RRF 平滑常数
 
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
+# ── 中文查询检测 ──────────────────────────────────────────────────────────────
 
-def _split_identifier(word: str) -> list[str]:
-    """processPayment → ['process', 'payment']"""
-    # 驼峰
-    parts = _CAMEL_RE.sub(" ", word).split()
-    # 下划线
-    result = []
-    for p in parts:
-        result.extend(p.split("_"))
-    return [p.lower() for p in result if len(p) >= 2]
+_QUERY_INSTRUCTION = (
+    "Represent this code search query for retrieving relevant code: "
+)
+
+def _is_chinese_dominant(query: str) -> bool:
+    """超过 40% 是中文字符 → 中文主导查询"""
+    if not query:
+        return False
+    chinese = sum(1 for c in query if "\u4e00" <= c <= "\u9fff")
+    return chinese / len(query) > 0.4
 
 
-def _extract_identifiers(query: str) -> list[str]:
-    """提取查询中的标识符（驼峰 / 下划线命名的词）"""
-    words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", query)
-    identifiers = []
-    for w in words:
-        if "_" in w or (re.search(r"[A-Z]", w) and re.search(r"[a-z]", w)):
-            identifiers.append(w)
-    return identifiers
+def _needs_llm_expansion(query: str) -> bool:
+    """
+    纯中文且没有英文标识符时，才触发 Ollama query expansion。
+    混合查询（"processPayment 实现"）直接走向量检索，不需要展开。
+    """
+    return _is_chinese_dominant(query) and not bool(
+        re.search(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", query)
+    )
+
+
+async def _expand_query_with_llm(query: str) -> str:
+    """
+    懒加载 Ollama：把中文查询翻译成等价的英文代码关键词。
+    失败时静默降级，不阻断主搜索流程。
+    prompt 要求模型只输出关键词，不解释。
+    """
+    try:
+        import httpx
+        from app.core.config import settings
+        prompt = (
+            f"Translate this Chinese code search query to English code keywords only. "
+            f"Output only space-separated keywords, method names, and identifiers. "
+            f"No explanation. No sentences.\n\nQuery: {query}"
+        )
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                f"{settings.OLLAMA_HOST}/api/generate",
+                json={
+                    "model":  settings.OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"num_predict": 40, "temperature": 0},
+                },
+            )
+            if resp.status_code == 200:
+                keywords = resp.json().get("response", "").strip()
+                # 只保留 ASCII 可打印字符，防止模型乱输出
+                keywords = " ".join(
+                    w for w in keywords.split()
+                    if all(ord(c) < 128 for c in w) and len(w) >= 2
+                )
+                return keywords
+    except Exception as e:
+        logger.debug("LLM query expansion skipped: %s", e)
+    return ""
 
 
 class QueryIntent:
     def __init__(self, raw: str):
         self.raw = raw
         self.identifiers = _extract_identifiers(raw)
-        self.expanded_tokens = []
+        self.expanded_tokens: list[str] = []
+        self.llm_expansion: str = ""   # 由 semantic_search 异步填充
 
+        # 驼峰/下划线标识符拆分
         for ident in self.identifiers:
             self.expanded_tokens.extend(_split_identifier(ident))
 
@@ -84,10 +125,32 @@ class QueryIntent:
         else:
             self.intent = "semantic"
 
+    def embed_query_text(self) -> str:
+        """
+        向量检索用的文本。
+        中文主导查询加 instruction 前缀，激活 bge-m3 的跨语言对齐能力。
+        """
+        if _is_chinese_dominant(self.raw):
+            return f"{_QUERY_INSTRUCTION}{self.raw}"
+        return self.raw
+
     def build_bm25_query(self) -> str:
-        """构建 BM25 查询：原词 + 拆分词"""
-        parts = [self.raw] + self.identifiers + self.expanded_tokens
-        return " ".join(parts)
+        """
+        BM25 查询：标识符原词 + 拆分词 + LLM 展开词 + 原始查询兜底。
+        """
+        parts = (
+            self.identifiers          # 精确标识符
+            + self.expanded_tokens    # 拆分词
+            + (self.llm_expansion.split() if self.llm_expansion else [])
+            + [self.raw]              # 兜底
+        )
+        seen: set[str] = set()
+        deduped = []
+        for p in parts:
+            if p not in seen and p:
+                seen.add(p)
+                deduped.append(p)
+        return " ".join(deduped)
 
 
 # ── Layer 2：双通道检索 + RRF ──────────────────────────────────────────────────
@@ -302,7 +365,28 @@ async def semantic_search(req: SearchRequest, db: aiosqlite.Connection) -> Searc
                               query=req.query, intent=intent.intent)
 
     # Layer 2：双通道检索
-    dense_results  = await _dense_search(req.query, req.repo_id, fetch_k, req.language_filter)
+    # 中文查询：LLM 展开（懒加载）与向量检索并行，不阻塞主路径
+    llm_task = None
+    if _needs_llm_expansion(req.query):
+        import asyncio as _asyncio
+        llm_task = _asyncio.create_task(_expand_query_with_llm(req.query))
+
+    # 向量检索用 instruction 前缀增强的文本
+    dense_results = await _dense_search(
+        intent.embed_query_text(), req.repo_id, fetch_k, req.language_filter
+    )
+
+    # 等 LLM 展开结果（最多等 5s，超时就用空）
+    if llm_task is not None:
+        import asyncio as _asyncio
+        try:
+            intent.llm_expansion = await _asyncio.wait_for(llm_task, timeout=5.0)
+            if intent.llm_expansion:
+                logger.info("LLM expansion: %r → %r", req.query, intent.llm_expansion)
+        except _asyncio.TimeoutError:
+            logger.debug("LLM expansion timeout, skipping")
+            intent.llm_expansion = ""
+
     sparse_results = _sparse_search(intent.build_bm25_query(), req.repo_id, fetch_k)
     candidates     = _rrf_merge(dense_results, sparse_results)
 

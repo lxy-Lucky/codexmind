@@ -235,4 +235,8 @@ async def _run_index_bg(repo_id: str, root_path: str) -> None:
     import aiosqlite as _aiosqlite
     async with _aiosqlite.connect(settings.SQLITE_PATH) as db:
         db.row_factory = _aiosqlite.Row
+        # busy_timeout：等待写锁最多 30s
+        await db.execute("PRAGMA busy_timeout = 30000")
+        await db.execute("PRAGMA journal_mode = WAL")
+        await db.execute("PRAGMA synchronous = NORMAL")
         await indexer_service.run_index(repo_id, root_path, db)

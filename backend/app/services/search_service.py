@@ -107,14 +107,18 @@ async def _dense_search(
             key="language", match=MatchValue(value=language_filter)
         )])
 
-    res = await client.query_points(
-        collection_name=col,
-        query=query_vec,
-        limit=top_k,
-        query_filter=qfilter,
-        with_payload=True,
-    )
-    return [(str(h.id), round(h.score, 4)) for h in res.points]
+    try:
+        res = await client.query_points(
+            collection_name=col,
+            query=query_vec,
+            limit=top_k,
+            query_filter=qfilter,
+            with_payload=True,
+        )
+        return [(str(h.id), round(h.score, 4)) for h in res.points]
+    except Exception as e:
+        logger.error("Dense search failed for collection %s: %s", col, e)
+        return []
 
 
 def _sparse_search(
@@ -282,7 +286,20 @@ async def semantic_search(req: SearchRequest, db: aiosqlite.Connection) -> Searc
     t0 = time.monotonic()
 
     intent = QueryIntent(req.query)
-    fetch_k = req.top_k * 5  # 多拉候选
+    fetch_k = req.top_k * 5
+
+    # ── collection 存在性检查（防止索引未完成时抛 404）─────────────────────────
+    col = collection_name(req.repo_id)
+    try:
+        existing = await get_qdrant().get_collections()
+        if col not in {c.name for c in existing.collections}:
+            logger.warning("Collection %s not found — repo not indexed yet", col)
+            return SearchResponse(results=[], total=0, latency_ms=0,
+                                  query=req.query, intent=intent.intent)
+    except Exception as e:
+        logger.error("Qdrant unreachable: %s", e)
+        return SearchResponse(results=[], total=0, latency_ms=0,
+                              query=req.query, intent=intent.intent)
 
     # Layer 2：双通道检索
     dense_results  = await _dense_search(req.query, req.repo_id, fetch_k, req.language_filter)

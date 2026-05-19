@@ -15,14 +15,19 @@ async def get_db() -> aiosqlite.Connection:
     """FastAPI Depends 使用的连接工厂（每次请求独立连接）"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        # 等待锁最多 15s，避免并发请求立即报 locked
+        await db.execute("PRAGMA busy_timeout = 15000")
+        await db.execute("PRAGMA journal_mode = WAL")
         yield db
 
 
 async def init_db() -> None:
     """应用启动时建表（幂等）"""
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA busy_timeout = 30000")
         await db.executescript("""
             PRAGMA journal_mode=WAL;
+            PRAGMA busy_timeout=30000;
 
             -- ── 仓库元数据 ────────────────────────────────────────
             CREATE TABLE IF NOT EXISTS repos (

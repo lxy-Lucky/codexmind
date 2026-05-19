@@ -37,6 +37,13 @@ BATCH_SIZE = 32
 
 async def run_index(repo_id: str, root_path: str, db: aiosqlite.Connection) -> None:
     root = Path(root_path)
+
+    # 设置 busy_timeout：等待锁最多 30s，而不是立即报 locked
+    await db.execute("PRAGMA busy_timeout = 30000")
+    # WAL 模式允许并发读，减少写冲突
+    await db.execute("PRAGMA journal_mode = WAL")
+    await db.execute("PRAGMA synchronous = NORMAL")
+
     await _update_status(db, repo_id, 1, "开始扫描文件...")
     await ensure_collection(repo_id)
 
@@ -387,17 +394,20 @@ async def _neo4j_link_methods_to_classes(repo_id: str) -> None:
 # ── SQLite 批量写 ──────────────────────────────────────────────────────────────
 
 async def _bulk_insert_symbols(db: aiosqlite.Connection, rows: list[dict]) -> None:
+    """分批写入，每批 500 行独立 commit，避免超长事务持锁"""
     if not rows:
         return
-    await db.executemany(
-        """INSERT OR REPLACE INTO symbols
-           (id, repo_id, file_path, class_name, method_name, signature,
-            line_start, line_end, chunk_id)
-           VALUES (:id, :repo_id, :file_path, :class_name, :method_name,
-                   :signature, :line_start, :line_end, :chunk_id)""",
-        rows,
-    )
-    await db.commit()
+    CHUNK = 500
+    sql = """INSERT OR REPLACE INTO symbols
+             (id, repo_id, file_path, class_name, method_name, signature,
+              line_start, line_end, chunk_id)
+             VALUES (:id, :repo_id, :file_path, :class_name, :method_name,
+                     :signature, :line_start, :line_end, :chunk_id)"""
+    for i in range(0, len(rows), CHUNK):
+        await db.executemany(sql, rows[i: i + CHUNK])
+        await db.commit()
+        # 短暂让出事件循环，避免长时间霸占写锁
+        await asyncio.sleep(0)
 
 
 # ── 工具函数 ───────────────────────────────────────────────────────────────────
@@ -437,16 +447,32 @@ async def _count_edges(repo_id: str) -> int:
 
 
 async def _update_status(db, repo_id: str, status: int, message: str) -> None:
+    """commit 失败时最多重试 3 次，每次等 500ms"""
     await db.execute(
         "UPDATE repos SET indexed=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
         (status, repo_id),
     )
-    await db.commit()
+    for attempt in range(3):
+        try:
+            await db.commit()
+            return
+        except Exception as e:
+            if attempt < 2:
+                logger.warning("DB commit retry %d: %s", attempt + 1, e)
+                await asyncio.sleep(0.5)
+            else:
+                logger.error("DB commit failed after 3 retries: %s", e)
 
 
 async def _log(db, repo_id: str, level: str, message: str) -> None:
+    """
+    只插入日志，不立即 commit（由调用方控制 commit 时机）。
+    WARNING/ERROR 级别立即 commit，INFO 随下次批量写一起落盘，
+    减少锁竞争。
+    """
     await db.execute(
         "INSERT INTO index_logs(repo_id, level, message) VALUES (?,?,?)",
         (repo_id, level, message),
     )
-    await db.commit()
+    if level in ("WARNING", "ERROR"):
+        await db.commit()

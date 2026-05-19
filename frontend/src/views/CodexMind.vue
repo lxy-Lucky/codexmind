@@ -130,28 +130,26 @@ const NAV_ICONS = [
           >‹</button>
         </div>
 
-        <!-- 整个内容区：一个统一的滚动容器 -->
-        <!-- 这样仓库列表多了、文件树深了，都能正常滚动 -->
-        <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0 flex flex-col">
+        <!-- 统一滚动容器：block 布局，内容自然撑高触发 overflow-y-auto -->
+        <!-- 关键：不用 flex-col，避免 flex 压缩子元素高度导致无法滚动 -->
+        <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
 
           <!-- 仓库区域 -->
           <RepoSelector />
 
-          <div class="border-t border-border-dim my-1 flex-shrink-0" />
+          <div class="border-t border-border-dim my-1" />
 
           <!-- Nav label -->
-          <div class="px-3 py-1 flex-shrink-0">
+          <div class="px-3 py-1">
             <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">
               {{ NAV_LABEL[activeNav] ?? activeNav }}
             </span>
           </div>
-          <div class="flex-shrink-0">
-            <SidebarNav :active="activeNav" @change="onNavChange" />
-          </div>
-          <div class="border-t border-border-dim my-1 flex-shrink-0" />
+          <SidebarNav :active="activeNav" @change="onNavChange" />
+          <div class="border-t border-border-dim my-1" />
 
-          <!-- Nav content：不再嵌套滚动容器，撑高由外层容器滚 -->
-          <div class="flex-1 min-h-0 overflow-x-auto">
+          <!-- Nav content：overflow-x-auto 处理文件树横向超长 -->
+          <div class="overflow-x-auto">
 
             <template v-if="activeNav === 'explorer'">
               <div v-if="!repo.currentRepo"

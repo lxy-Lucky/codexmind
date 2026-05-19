@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from app.db.database import get_db
 from app.models.analysis import AnalysisRequest, ChatMessage
-from app.services.llm_service import stream_analysis
+from app.services.analysis_service import stream_analysis
 
 router = APIRouter(prefix="/api/analyze", tags=["analysis"])
 logger = logging.getLogger(__name__)
@@ -22,15 +22,13 @@ async def analyze_stream(
     request: Request,
     db: aiosqlite.Connection = Depends(get_db),
 ):
-    # 直接读 JSON，支持前端附加的 _history 字段
     body_raw: dict[str, Any] = await request.json()
 
     try:
-        req = AnalysisRequest(**{k: v for k, v in body_raw.items() if k != '_history'})
+        req = AnalysisRequest(**{k: v for k, v in body_raw.items() if k != "_history"})
     except Exception as e:
         raise HTTPException(422, str(e))
 
-    # 解析对话历史
     raw_history = body_raw.get("_history", []) or []
     history = [ChatMessage(**m) for m in raw_history if isinstance(m, dict)]
 

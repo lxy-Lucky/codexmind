@@ -31,6 +31,12 @@ dependencies = [
     "tree-sitter-typescript>=0.21.0",
     "tree-sitter-go>=0.21.0",
 
+    # Neo4j
+    "neo4j>=5.20.0",
+
+    # BM25
+    "rank-bm25>=0.2.2",
+
     # Utils
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",

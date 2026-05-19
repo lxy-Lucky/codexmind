@@ -17,7 +17,8 @@ class AnalysisRequest(BaseModel):
     code: str
     mode: str = "summary"
     custom_prompt: Optional[str] = None
-    _history: Optional[List[ChatMessage]] = None   # 多轮对话历史
+    # 新增：symbol_id 用于从 Neo4j 查调用链上下文
+    symbol_id: Optional[str] = None
 
     model_config = {"populate_by_name": True}
 

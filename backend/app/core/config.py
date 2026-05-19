@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
-from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +22,11 @@ class Settings(BaseSettings):
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
 
+    # ── Neo4j ───────────────────────────────────────
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "codexmind"
+
     # ── Embedding ───────────────────────────────────
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
     EMBEDDING_DEVICE: str = "cuda"
@@ -34,17 +37,21 @@ class Settings(BaseSettings):
     OLLAMA_HOST: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5-coder:14b"
     OLLAMA_TIMEOUT: int = 120
+    LLM_TRIGGER_THRESHOLD: float = 0.55
 
     # ── Indexer ─────────────────────────────────────
     CHUNK_MAX_TOKENS: int = 512
     CHUNK_OVERLAP_TOKENS: int = 64
-    SUPPORTED_EXTENSIONS: str = ".java,.ts,.js"
+    SUPPORTED_EXTENSIONS: str = ".java,.ts,.js,.vue,.xml,.jsp"
+
+    # ── BM25 ────────────────────────────────────────
+    BM25_INDEX_DIR: Path = Path("./data/bm25")
 
     # ── SQLite ──────────────────────────────────────
     SQLITE_PATH: Path = Path("./data/history.db")
 
     # ── Security ────────────────────────────────────
-    ALLOWED_REPO_ROOTS: str = ""  # 空 = 不限制
+    ALLOWED_REPO_ROOTS: str = ""
 
     # ── Computed ─────────────────────────────────────
     @property
@@ -59,7 +66,6 @@ class Settings(BaseSettings):
         return [Path(p.strip()) for p in raw.split(",") if p.strip()]
 
     def is_path_allowed(self, path: Path) -> bool:
-        """验证路径是否在白名单内（白名单为空时放行）"""
         if not self.allowed_roots:
             return True
         resolved = path.resolve()
@@ -70,11 +76,10 @@ class Settings(BaseSettings):
 
     @property
     def vector_size(self) -> int:
-        """bge-m3 dense vector 维度"""
         return 1024
 
 
 settings = Settings()
 
-# 确保 SQLite 目录存在
 settings.SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
+settings.BM25_INDEX_DIR.mkdir(parents=True, exist_ok=True)

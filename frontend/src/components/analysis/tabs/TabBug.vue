@@ -14,7 +14,7 @@ const SEV_CONFIG = {
     <!-- Loading -->
     <div v-if="analysis.streaming" class="p-8 flex flex-col items-center gap-3 text-text-muted">
       <span class="text-2xl animate-spin-slow inline-block">⟳</span>
-      <span class="font-mono text-[12px]">Bug 检测中...</span>
+      <span class="font-mono text-[12px]">Bug 检测中（含调用链分析）...</span>
     </div>
 
     <!-- Results -->
@@ -24,6 +24,21 @@ const SEV_CONFIG = {
         <span class="text-red-accent">{{ analysis.bugItems.filter(b=>b.severity==='Critical').length }} Critical</span>
         <span class="text-amber">{{ analysis.bugItems.filter(b=>b.severity==='Warning').length }} Warning</span>
       </div>
+
+      <!-- 调用链风险提示 -->
+      <div
+        v-if="analysis.currentCallers?.length"
+        class="rounded-lg border border-amber/20 bg-amber/5 p-3 font-mono text-[11px]"
+      >
+        <span class="text-amber">⚡ 调用链风险：</span>
+        <span class="text-text-secondary">
+          此方法被 {{ analysis.currentCallers.length }} 个方法调用
+          （{{ analysis.currentCallers.map(c => c.method_name).slice(0,3).join('、') }}
+          {{ analysis.currentCallers.length > 3 ? '等' : '' }}），
+          Critical 问题会向上传播。
+        </span>
+      </div>
+
       <div
         v-for="(bug, idx) in analysis.bugItems" :key="idx"
         class="rounded-lg border p-3.5 animate-fade-in"
@@ -54,12 +69,10 @@ const SEV_CONFIG = {
       </div>
     </div>
 
-    <!-- Error -->
     <div v-else-if="analysis.error" class="p-4 font-mono text-[12px] text-red-accent whitespace-pre-wrap">
       {{ analysis.error }}
     </div>
 
-    <!-- Empty -->
     <div v-else class="p-8 text-center text-text-muted font-mono text-[12px]">
       <div class="text-3xl mb-2 opacity-20">◉</div>
       选中代码后点击工具栏「Bug」按钮

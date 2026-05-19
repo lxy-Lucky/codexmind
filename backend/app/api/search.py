@@ -18,25 +18,15 @@ async def search(
     body: SearchRequest,
     db: aiosqlite.Connection = Depends(get_db),
 ):
-    # 检查仓库存在
     async with db.execute("SELECT indexed FROM repos WHERE id=?", (body.repo_id,)) as cur:
         row = await cur.fetchone()
     if not row:
         raise HTTPException(404, "仓库不存在")
     if dict(row)["indexed"] != 2:
-        raise HTTPException(400, "仓库尚未完成索引，请先触发索引任务")
+        raise HTTPException(400, "仓库尚未完成索引")
 
-    result = await semantic_search(body)
-
-    # 写入查询历史
-    await db.execute(
-        """INSERT INTO query_history(repo_id, mode, query, result_count, latency_ms)
-           VALUES (?,?,?,?,?)""",
-        (body.repo_id, body.mode, body.query, result.total, result.latency_ms),
-    )
-    await db.commit()
-
-    return result
+    # search_service v2 自己写查询历史
+    return await semantic_search(body, db)
 
 
 @router.get("/history", summary="查询历史记录")
@@ -46,7 +36,7 @@ async def get_history(
     db: aiosqlite.Connection = Depends(get_db),
 ):
     async with db.execute(
-        """SELECT id, repo_id, mode, query, result_count, latency_ms, created_at
+        """SELECT id, repo_id, query, intent, result_count, top_score, latency_ms, created_at
            FROM query_history
            WHERE repo_id=?
            ORDER BY id DESC

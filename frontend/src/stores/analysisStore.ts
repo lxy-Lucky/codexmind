@@ -73,7 +73,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
         latencyMs.value  = ev.latency_ms ?? 0
         _abort = null
         if (targetMode === 'bug') {
-          try { bugItems.value = JSON.parse(rawBuf.trim()) }
+          try { bugItems.value = JSON.parse(_extractJson(rawBuf)) }
           catch { error.value = 'Bug 检测结果解析失败\n' + rawBuf }
         }
       },
@@ -140,6 +140,21 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
   function _modeToTab(mode: AnalysisMode): typeof activeTab.value {
     return ({ summary:'summary', bug:'bug', deps:'deps', custom:'chat' } as any)[mode] ?? 'summary'
+  }
+
+
+  // ── Bug JSON 提取：兼容 LLM 偶尔输出 markdown fence 的情况 ──────────────────
+  function _extractJson(raw: string): string {
+    let s = raw.trim()
+    // 去掉 ```json ... ``` 或 ``` ... ``` 包裹
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+    // 找第一个 [ 到最后一个 ]，提取数组部分
+    const start = s.indexOf('[')
+    const end   = s.lastIndexOf(']')
+    if (start !== -1 && end !== -1 && end > start) {
+      return s.slice(start, end + 1)
+    }
+    return s
   }
 
   return {

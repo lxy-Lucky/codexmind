@@ -30,7 +30,7 @@ const rightW    = ref(380)
 const MIN_RIGHT = 280
 const MAX_RIGHT = 640
 
-// ── Drag ─────────────────────────────────────────────────────────────────────
+// ── Drag ──────────────────────────────────────────────────────────────────────
 type DragTarget = 'left' | 'right' | null
 const dragTarget = ref<DragTarget>(null)
 
@@ -42,12 +42,8 @@ function onMouseMove(e: MouseEvent) {
   if (!dragTarget.value) return
   if (dragTarget.value === 'left') {
     const w = e.clientX
-    if (w < MIN_LEFT / 2) {
-      leftCollapsed.value = true
-    } else {
-      leftCollapsed.value = false
-      leftW.value = Math.min(MAX_LEFT, Math.max(MIN_LEFT, w))
-    }
+    if (w < MIN_LEFT / 2) { leftCollapsed.value = true }
+    else { leftCollapsed.value = false; leftW.value = Math.min(MAX_LEFT, Math.max(MIN_LEFT, w)) }
   } else {
     rightW.value = Math.min(MAX_RIGHT, Math.max(MIN_RIGHT, window.innerWidth - e.clientX))
   }
@@ -64,13 +60,11 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', onMouseUp)
 })
 
-// ── Grid ─────────────────────────────────────────────────────────────────────
+// ── Grid ──────────────────────────────────────────────────────────────────────
 const gridCols = computed(() => {
   const lw = leftCollapsed.value ? COLLAPSED_W : leftW.value
   return `${lw}px 1fr ${rightW.value}px`
 })
-
-// v-bind CSS 变量：drag handle 定位用
 const leftHandlePos  = computed(() => (leftCollapsed.value ? COLLAPSED_W : leftW.value) + 'px')
 const rightHandlePos = computed(() => rightW.value + 'px')
 
@@ -82,30 +76,20 @@ function onNavChange(id: string) {
   if (id === 'history') analysis.setTab('history')
   if (leftCollapsed.value) leftCollapsed.value = false
 }
-
-// 搜索完成 → 自动切到搜索结果视图
 function onSearched() {
   activeNav.value = 'search'
   if (leftCollapsed.value) leftCollapsed.value = false
 }
-
-// 从搜索结果点「打开文件」→ 切回文件编辑视图
-function openFileFromSearch() {
-  activeNav.value = 'explorer'
-}
+function openFileFromSearch() { activeNav.value = 'explorer' }
 
 const NAV_LABEL: Record<string, string> = {
-  explorer: '文件资源',
-  search:   '搜索结果',
-  // bug:      'Bug 扫描',
-  // history:  '历史记录',
+  explorer: '文件资源', search: '搜索结果', bug: 'Bug 扫描', history: '历史记录',
 }
-
 const NAV_ICONS = [
   { id: 'explorer', icon: '◫' },
   { id: 'search',   icon: '⌕' },
-  // { id: 'bug',      icon: '◉' },
-  // { id: 'history',  icon: '⟲' },
+  { id: 'bug',      icon: '◉' },
+  { id: 'history',  icon: '⟲' },
 ]
 </script>
 
@@ -115,17 +99,15 @@ const NAV_ICONS = [
     :style="{ gridTemplateColumns: gridCols }"
     :class="{ 'cursor-col-resize select-none': dragTarget }"
   >
-    <!-- Top bar -->
     <TopBar class="top-bar-row" />
 
     <!-- ════ Left Sidebar ════ -->
     <aside class="sidebar">
 
-      <!-- Collapsed: icon strip -->
+      <!-- Collapsed icon strip -->
       <template v-if="leftCollapsed">
         <div class="flex flex-col items-center pt-2 gap-1 w-full overflow-hidden">
-          <button class="icon-btn text-cyan" title="展开侧边栏"
-            @click="leftCollapsed = false">›</button>
+          <button class="icon-btn text-cyan" title="展开" @click="leftCollapsed = false">›</button>
           <div class="w-5 border-t border-border-dim my-1" />
           <button
             v-for="nav in NAV_ICONS" :key="nav.id"
@@ -136,98 +118,95 @@ const NAV_ICONS = [
         </div>
       </template>
 
-      <!-- Expanded -->
+      <!-- Expanded：整体一个滚动容器 -->
       <template v-else>
-        <!-- Section: Repo -->
+        <!-- Fixed header: 标题 + 收起按钮 -->
         <div class="px-3 pt-3 pb-1 flex items-center justify-between flex-shrink-0">
           <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">仓库</span>
           <button
             class="w-5 h-5 flex items-center justify-center rounded font-mono text-[11px]
                    text-text-muted hover:text-cyan hover:bg-cyan-dim transition-colors"
-            title="收起侧边栏"
             @click="leftCollapsed = true"
           >‹</button>
         </div>
 
-        <!-- overflow-hidden here keeps repo list from blowing out -->
-        <div class="flex-shrink-0 overflow-hidden">
+        <!-- 整个内容区：一个统一的滚动容器 -->
+        <!-- 这样仓库列表多了、文件树深了，都能正常滚动 -->
+        <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0 flex flex-col">
+
+          <!-- 仓库区域 -->
           <RepoSelector />
-        </div>
 
-        <div class="border-t border-border-dim my-1 flex-shrink-0" />
+          <div class="border-t border-border-dim my-1 flex-shrink-0" />
 
-        <!-- Section: Nav -->
-        <div class="px-3 py-1 flex-shrink-0">
-          <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-            {{ NAV_LABEL[activeNav] ?? activeNav }}
-          </span>
-        </div>
-        <div class="flex-shrink-0">
-          <SidebarNav :active="activeNav" @change="onNavChange" />
-        </div>
+          <!-- Nav label -->
+          <div class="px-3 py-1 flex-shrink-0">
+            <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">
+              {{ NAV_LABEL[activeNav] ?? activeNav }}
+            </span>
+          </div>
+          <div class="flex-shrink-0">
+            <SidebarNav :active="activeNav" @change="onNavChange" />
+          </div>
+          <div class="border-t border-border-dim my-1 flex-shrink-0" />
 
-        <div class="border-t border-border-dim mt-1 flex-shrink-0" />
+          <!-- Nav content：不再嵌套滚动容器，撑高由外层容器滚 -->
+          <div class="flex-1 min-h-0 overflow-x-auto">
 
-        <!-- Scrollable content — KEY: overflow-y-auto + min-h-0 -->
-        <div class="flex-1 overflow-y-auto overflow-x-auto min-h-0 min-w-0">
-
-          <!-- 文件资源 -->
-          <template v-if="activeNav === 'explorer'">
-            <div v-if="!repo.currentRepo"
-              class="px-4 py-3 font-mono text-[11px] text-text-muted">
-              请先添加仓库
-            </div>
-            <div v-else-if="!repo.fileTree.length"
-              class="px-4 py-3 font-mono text-[11px] text-text-muted animate-pulse">
-              文件树加载中...
-            </div>
-            <!-- FileTree needs min-width so horizontal scroll works -->
-            <div v-else class="min-w-max">
-              <FileTree :nodes="repo.fileTree" />
-            </div>
-            <div
-              v-if="repo.indexing && repo.indexProgress"
-              class="mx-3 my-2 px-3 py-2 rounded-md bg-amber/10 border border-amber/20
-                     font-mono text-[11px] text-amber flex items-center gap-2"
-            >
-              <span class="animate-spin-slow flex-shrink-0">⟳</span>
-              <span class="truncate">{{ repo.indexProgress.message }}</span>
-            </div>
-          </template>
-
-          <!-- 搜索结果 -->
-          <template v-else-if="activeNav === 'search'">
-            <SearchResults compact @open-file="openFileFromSearch" />
-          </template>
-
-          <!-- Bug 扫描 -->
-          <template v-else-if="activeNav === 'bug'">
-            <div class="p-4 flex flex-col gap-3">
-              <p class="font-mono text-[11px] text-text-muted leading-relaxed">
-                选择文件后点击工具栏「Bug」按钮分析当前文件。
-              </p>
-              <button
-                class="py-2.5 rounded-lg font-mono text-[12px] font-semibold
-                       border border-red-accent/40 text-red-accent hover:bg-red-accent/10
-                       transition-colors flex items-center justify-center gap-2"
-                :disabled="!repo.isIndexDone"
-                :class="{ 'opacity-40 cursor-not-allowed': !repo.isIndexDone }"
-                @click="analysis.setTab('bug')"
+            <template v-if="activeNav === 'explorer'">
+              <div v-if="!repo.currentRepo"
+                class="px-4 py-3 font-mono text-[11px] text-text-muted">
+                请先添加仓库
+              </div>
+              <div v-else-if="!repo.fileTree.length"
+                class="px-4 py-3 font-mono text-[11px] text-text-muted animate-pulse">
+                文件树加载中...
+              </div>
+              <!-- min-w-max 让文件树横向撑开，外层 overflow-x-auto 提供横滚 -->
+              <div v-else class="min-w-max pb-2">
+                <FileTree :nodes="repo.fileTree" />
+              </div>
+              <div
+                v-if="repo.indexing && repo.indexProgress"
+                class="mx-3 my-2 px-3 py-2 rounded-md bg-amber/10 border border-amber/20
+                       font-mono text-[11px] text-amber flex items-center gap-2"
               >
-                <span>◉</span> 打开 Bug 检测面板
-              </button>
-            </div>
-          </template>
+                <span class="animate-spin-slow flex-shrink-0">⟳</span>
+                <span class="truncate">{{ repo.indexProgress.message }}</span>
+              </div>
+            </template>
 
-          <!-- 历史记录 -->
-          <template v-else-if="activeNav === 'history'">
-            <TabHistory />
-          </template>
+            <template v-else-if="activeNav === 'search'">
+              <SearchResults compact @open-file="openFileFromSearch" />
+            </template>
 
+            <template v-else-if="activeNav === 'bug'">
+              <div class="p-4 flex flex-col gap-3">
+                <p class="font-mono text-[11px] text-text-muted leading-relaxed">
+                  选择文件后点击工具栏「Bug」按钮分析。
+                </p>
+                <button
+                  class="py-2.5 rounded-lg font-mono text-[12px] font-semibold
+                         border border-red-accent/40 text-red-accent hover:bg-red-accent/10
+                         transition-colors flex items-center justify-center gap-2"
+                  :disabled="!repo.isIndexDone"
+                  :class="{ 'opacity-40 cursor-not-allowed': !repo.isIndexDone }"
+                  @click="analysis.setTab('bug')"
+                >
+                  <span>◉</span> 打开 Bug 检测面板
+                </button>
+              </div>
+            </template>
+
+            <template v-else-if="activeNav === 'history'">
+              <TabHistory />
+            </template>
+
+          </div>
         </div>
       </template>
 
-      <!-- Left drag handle: fixed，脱离 sidebar overflow -->
+      <!-- Left drag handle：fixed，不受 overflow:hidden 裁剪 -->
       <div
         class="left-drag-handle"
         :class="{ active: dragTarget === 'left' }"
@@ -237,7 +216,6 @@ const NAV_ICONS = [
 
     <!-- ════ Main Content ════ -->
     <main class="main-content">
-      <!-- 监听 searched 事件，自动切搜索结果视图 -->
       <SearchPanel @searched="onSearched" />
       <div class="flex-1 flex flex-col overflow-hidden">
         <CodeToolbar />
@@ -252,10 +230,7 @@ const NAV_ICONS = [
       @mousedown="startDrag('right', $event)"
     />
 
-    <!-- ════ Right Analysis Panel ════ -->
     <AnalysisPanel />
-
-    <!-- Status Bar -->
     <StatusBar />
   </div>
 </template>
@@ -268,27 +243,21 @@ const NAV_ICONS = [
   position: relative;
   z-index: 1;
 }
+.top-bar-row { grid-column: 1 / -1; grid-row: 1; }
 
-.top-bar-row {
-  grid-column: 1 / -1;
-  grid-row: 1;
-}
-
-/* ── Left Sidebar ── */
 .sidebar {
   grid-column: 1;
   grid-row: 2;
   position: relative;
-  /* overflow: hidden — 恢复正常，滚动由内层 flex-1 子容器负责 */
+  /* overflow:hidden — 滚动由内层 flex-1 子容器负责 */
   @apply flex flex-col bg-bg-base border-r border-border-dim overflow-hidden;
 }
-
 .icon-btn {
   @apply w-8 h-8 flex items-center justify-center rounded font-mono text-[13px] transition-colors;
 }
 .icon-btn:hover { @apply bg-bg-hover text-text-primary; }
 
-/* fixed 定位，完全脱离 sidebar 的 overflow:hidden 裁剪 */
+/* fixed 定位，脱离 sidebar overflow:hidden 裁剪 */
 .left-drag-handle {
   position: fixed;
   top: 52px;
@@ -302,18 +271,14 @@ const NAV_ICONS = [
   transition: background 0.15s;
 }
 .left-drag-handle:hover,
-.left-drag-handle.active {
-  background: rgba(0, 212, 255, 0.25);
-}
+.left-drag-handle.active { background: rgba(0,212,255,0.25); }
 
-/* ── Main Content ── */
 .main-content {
   grid-column: 2;
   grid-row: 2;
   @apply flex flex-col overflow-hidden bg-bg-deep;
 }
 
-/* ── Right drag handle ── */
 .right-drag-handle {
   position: fixed;
   top: 52px;
@@ -327,18 +292,8 @@ const NAV_ICONS = [
   z-index: 30;
 }
 .right-drag-handle:hover,
-.right-drag-handle.active {
-  background: rgba(0, 212, 255, 0.25);
-}
+.right-drag-handle.active { background: rgba(0,212,255,0.25); }
 
-/* ── Analysis Panel ── */
-:deep(.analysis-panel) {
-  grid-column: 3;
-  grid-row: 2;
-}
-
-:deep(.status-bar) {
-  grid-column: 1 / -1;
-  grid-row: 3;
-}
+:deep(.analysis-panel) { grid-column: 3; grid-row: 2; }
+:deep(.status-bar)      { grid-column: 1 / -1; grid-row: 3; }
 </style>

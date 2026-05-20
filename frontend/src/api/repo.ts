@@ -1,7 +1,7 @@
 import { http } from './client'
 import type {
   FileContent, FileNode, IndexProgress,
-  Repo, RepoListResponse,
+  Repo, RepoListResponse, SymbolInfo,
 } from '@/types'
 
 export const repoApi = {
@@ -33,4 +33,10 @@ export const repoApi = {
 
   fileContent: (id: string, path: string) =>
     http.get<FileContent>(`/api/repo/${id}/file`, { params: { path } }).then(r => r.data),
+
+  /** 给定文件路径 + 行号，返回光标所在的方法符号（没有则返回 null） */
+  symbolAt: (id: string, filePath: string, line: number): Promise<SymbolInfo | null> =>
+    http.get<SymbolInfo | null>(`/api/repo/${id}/symbol/at`, {
+      params: { file_path: filePath, line },
+    }).then(r => r.data).catch(() => null),
 }

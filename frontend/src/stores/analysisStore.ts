@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { streamAnalysis, streamChat } from '@/api/analysis'
+import { repoApi } from '@/api/repo'
 import { useEditorStore } from './editorStore'
 import { useRepoStore } from './repoStore'
 import type { AnalysisMode, BugItem, ChatMessage, SSEChunk } from '@/types'
@@ -36,27 +37,43 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   /**
-   * 工具栏「依赖」按钮的专用入口：
-   *   - 有选中的 symbol（来自搜索结果点击）→ 方法调用图
-   *   - 只有打开的文件               → 类依赖图，类名从文件名提取
+   * 工具栏「依赖」按钮的专用入口。优先级：
+   *   1. 已有 symbol_id（来自搜索结果点击）→ 方法调用图
+   *   2. 无 symbol_id 但编辑器有光标     → 按行查数据库，找到则方法调用图
+   *   3. 光标不在任何方法内              → 类依赖图（类名从文件名提取）
    */
-  function openDepsGraph() {
+  async function openDepsGraph() {
     const editorStore = useEditorStore()
+    const repoStore   = useRepoStore()
     const file = editorStore.currentFile
     if (!file) { error.value = '请先打开文件'; return }
 
     activeTab.value = 'deps'
 
+    // ① 已有 symbol（搜索结果点击后设置）
     if (currentSymbolId.value) {
-      // 当前有选中的方法 symbol → 方法调用图
       depsView.value = 'method'
-    } else {
-      // 仅有打开的文件 → 类依赖图，从文件名提取类名
-      const fileName  = file.path.replace(/\\/g, '/').split('/').pop() ?? ''
-      const className = fileName.replace(/\.[^.]+$/, '')   // 去掉扩展名
-      currentClassName.value = className
-      depsView.value = 'class'
+      return
     }
+
+    // ② 尝试从 Monaco 光标位置推断当前方法
+    const cursorLine = editorStore.editorInstance?.getPosition()?.lineNumber ?? null
+    if (cursorLine && repoStore.currentRepo) {
+      try {
+        const sym = await repoApi.symbolAt(repoStore.currentRepo.id, file.path, cursorLine)
+        if (sym?.id) {
+          currentSymbolId.value  = sym.id
+          currentClassName.value = sym.class_name ?? ''
+          depsView.value = 'method'
+          return
+        }
+      } catch { /* 查不到则继续回落 */ }
+    }
+
+    // ③ 光标不在任何方法上 → 类依赖图
+    const fileName  = file.path.replace(/\\/g, '/').split('/').pop() ?? ''
+    currentClassName.value = fileName.replace(/\.[^.]+$/, '')
+    depsView.value = 'class'
   }
 
   function abort() {

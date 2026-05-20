@@ -66,6 +66,18 @@ export interface SearchResultItem {
   score: number
   language: string
   chunk_type: string
+  symbol_id?: string
+  class_name?: string
+}
+
+// 光标位置方法符号（来自 /api/repo/{id}/symbol/at）
+export interface SymbolInfo {
+  id: string
+  name: string
+  class_name?: string
+  file_path: string
+  line_start: number
+  line_end: number
 }
 
 export interface SearchResponse {

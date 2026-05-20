@@ -29,8 +29,11 @@ function toggle(path: string) {
 async function openFile(node: FileNode) {
   if (node.type !== 'file') return
   await editor.openFile(node.path)
-  // 打开新文件时清空分析结果
-  analysis.$patch({ streamingText: '', bugItems: [], hasResult: false, error: null })
+  // 打开新文件时清空分析结果 + 旧的 symbol（避免跨文件残留搜索结果的方法 id）
+  analysis.$patch({
+    streamingText: '', bugItems: [], hasResult: false, error: null,
+    currentSymbolId: '', currentClassName: '',
+  })
 }
 
 function isActive(node: FileNode) {

@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 
 import aiosqlite
+from typing import Any, Optional
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.core.config import settings
@@ -180,6 +182,43 @@ async def get_file_content(
         raise HTTPException(404, str(e))
     except (PermissionError, IsADirectoryError, ValueError) as e:
         raise HTTPException(400, str(e))
+
+
+# ── 光标位置方法符号查找 ──────────────────────────────────────────────────────────
+
+@router.get("/{repo_id}/symbol/at", summary="光标位置的方法符号查找")
+async def symbol_at_line(
+    repo_id: str,
+    file_path: str = Query(..., description="相对于 repo root 的文件路径"),
+    line: int      = Query(..., ge=1, description="光标行号（1-indexed）"),
+    db: aiosqlite.Connection = Depends(get_db),
+) -> Optional[dict[str, Any]]:
+    """
+    给定 file_path + 行号，返回包含该行的最小方法符号。
+    用于从侧边栏打开文件后，通过光标位置触发方法调用图。
+    找不到时返回 null（HTTP 200）。
+    """
+    # 兼容 Windows 反斜杠 / Linux 正斜杠两种存储格式
+    fp_fwd  = file_path.replace("\\", "/")
+    fp_back = file_path.replace("/", "\\")
+    async with db.execute(
+        """
+        SELECT id, method_name AS name, class_name, file_path, line_start, line_end
+        FROM symbols
+        WHERE repo_id    = ?
+          AND (file_path = ? OR file_path = ?)
+          AND line_start <= ?
+          AND line_end   >= ?
+          AND method_name IS NOT NULL
+        ORDER BY (line_end - line_start) ASC
+        LIMIT 1
+        """,
+        (repo_id, fp_fwd, fp_back, line, line),
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        return None
+    return dict(row)
 
 
 # ── 索引日志 ──────────────────────────────────────────────────────────────────

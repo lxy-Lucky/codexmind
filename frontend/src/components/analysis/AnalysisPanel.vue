@@ -74,6 +74,7 @@ const tabs: Tab[] = [
         :repoId="repo.currentRepo?.id ?? ''"
         :symbolId="analysis.currentSymbolId"
         :className="analysis.currentClassName || undefined"
+        :requestedView="analysis.depsView"
       />
       <TabHistory v-else-if="analysis.activeTab === 'history'" />
       <TabChat    v-else-if="analysis.activeTab === 'chat'" />

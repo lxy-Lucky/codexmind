@@ -49,7 +49,7 @@ function copyPath() {
       <button class="toolbar-btn danger" title="Bug 检测" @click="triggerAnalysis('bug')">
         ◉ Bug
       </button>
-      <button class="toolbar-btn purple" title="依赖分析" @click="triggerAnalysis('deps')">
+      <button class="toolbar-btn purple" title="依赖分析" @click="analysis.openDepsGraph()">
         ⟳ 依赖
       </button>
     </div>

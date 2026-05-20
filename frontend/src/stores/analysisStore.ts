@@ -10,6 +10,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const activeTab      = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat'>('summary')
   const currentSymbolId  = ref('')
   const currentClassName = ref('')
+  const depsView = ref<'method' | 'class' | 'impact'>('class')  // 依赖图子视图
   const streaming      = ref(false)
   const streamingText = ref('')
   const bugItems      = ref<BugItem[]>([])
@@ -32,6 +33,30 @@ export const useAnalysisStore = defineStore('analysis', () => {
   function setGraphSymbol(symbolId: string, className?: string) {
     currentSymbolId.value  = symbolId
     currentClassName.value = className ?? ''
+  }
+
+  /**
+   * 工具栏「依赖」按钮的专用入口：
+   *   - 有选中的 symbol（来自搜索结果点击）→ 方法调用图
+   *   - 只有打开的文件               → 类依赖图，类名从文件名提取
+   */
+  function openDepsGraph() {
+    const editorStore = useEditorStore()
+    const file = editorStore.currentFile
+    if (!file) { error.value = '请先打开文件'; return }
+
+    activeTab.value = 'deps'
+
+    if (currentSymbolId.value) {
+      // 当前有选中的方法 symbol → 方法调用图
+      depsView.value = 'method'
+    } else {
+      // 仅有打开的文件 → 类依赖图，从文件名提取类名
+      const fileName  = file.path.replace(/\\/g, '/').split('/').pop() ?? ''
+      const className = fileName.replace(/\.[^.]+$/, '')   // 去掉扩展名
+      currentClassName.value = className
+      depsView.value = 'class'
+    }
   }
 
   function abort() {
@@ -166,10 +191,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   return {
-    activeTab, currentSymbolId, currentClassName,
+    activeTab, currentSymbolId, currentClassName, depsView,
     streaming, streamingText, bugItems,
     confidence, latencyMs, error, hasResult,
     chatHistory, chatStreaming,
-    setTab, setGraphSymbol, analyze, abort, sendChat, clearChat,
+    setTab, setGraphSymbol, openDepsGraph, analyze, abort, sendChat, clearChat,
   }
 })

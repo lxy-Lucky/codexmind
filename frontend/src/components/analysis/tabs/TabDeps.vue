@@ -63,6 +63,7 @@ const props = defineProps<{
   repoId: string
   symbolId?: string
   className?: string
+  requestedView?: ViewKey   // 由工具栏「依赖」按钮驱动，决定激活哪个子视图
 }>()
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -247,14 +248,37 @@ function changeDepth(delta: number) {
 }
 
 // ── Watchers ───────────────────────────────────────────────────────────────
-watch(() => props.symbolId, () => {
-  if (activeView.value !== 'class') loadGraph()
-})
-watch(() => props.className, () => {
-  if (activeView.value === 'class') loadGraph()
+
+/**
+ * 工具栏「依赖」按钮触发：requestedView 变化时切换子视图并重新加载。
+ * Vue 3 在同一 tick 内对多个响应式源的变更只触发一次 watcher，
+ * 所以 requestedView + symbolId/className 同时变化时不会重复调用 loadGraph。
+ */
+watch(() => props.requestedView, (v) => {
+  if (!v) return
+  activeView.value = v
+  loadGraph()
 })
 
-onMounted(() => { if (props.symbolId) loadGraph() })
+// 搜索结果点击后 symbolId 变化 → 如果当前是方法/影响域视图则刷新
+watch(() => props.symbolId, (newId, oldId) => {
+  if (newId !== oldId && newId && activeView.value !== 'class') loadGraph()
+})
+
+// className 变化 → 如果当前是类依赖图视图则刷新
+watch(() => props.className, (newCls, oldCls) => {
+  if (newCls !== oldCls && newCls && activeView.value === 'class') loadGraph()
+})
+
+onMounted(() => {
+  // 初次挂载时若已有数据，根据 requestedView 或可用 prop 决定加载
+  if (props.requestedView) {
+    activeView.value = props.requestedView
+    loadGraph()
+  } else if (props.symbolId) {
+    loadGraph()
+  }
+})
 onUnmounted(() => { simulation?.stop() })
 </script>
 

@@ -14,6 +14,8 @@ export const useEditorStore = defineStore('editor', () => {
 
   // Monaco 实例（shallow 避免响应式代理 Monaco 内部对象）
   const editorInstance   = shallowRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
+  // 保存高亮装饰 ID，下次调用时先清除旧装饰，避免持续累积
+  let _decorationIds: string[] = []
 
   // ── Actions ────────────────────────────────────────────────────────────────
   async function openFile(path: string, lineStart?: number, lineEnd?: number) {
@@ -50,7 +52,8 @@ export const useEditorStore = defineStore('editor', () => {
     highlightLines.value = [lineStart, lineEnd]
 
     editor.revealLineInCenter(lineStart)
-    editor.deltaDecorations([], [{
+    // 传入旧装饰 ID 以清除，再接收新 ID 保存，避免装饰持续堆叠
+    _decorationIds = editor.deltaDecorations(_decorationIds, [{
       range: new (window as any).monaco.Range(lineStart, 1, lineEnd, 9999),
       options: {
         isWholeLine: true,

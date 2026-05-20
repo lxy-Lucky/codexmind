@@ -41,21 +41,22 @@ async def get_method_graph(
 ) -> GraphResponse:
     """
     以 symbol_id 为中心，展开 depth 跳的调用图（双向：调用者 + 被调用者）。
+    注意：Cypher 变长路径范围不接受参数，depth 直接格式化进查询字符串。
     """
     depth = min(depth, 4)  # 最多 4 跳，防止图爆炸
 
     rows = await run_query(
-        """
-        MATCH (center:Method {id: $symbol_id})
-        CALL {
+        f"""
+        MATCH (center:Method {{id: $symbol_id}})
+        CALL {{
           WITH center
-          MATCH path = (center)-[:CALLS*0..$depth]->(callee:Method {repo_id: $repo_id})
+          MATCH path = (center)-[:CALLS*0..{depth}]->(callee:Method {{repo_id: $repo_id}})
           RETURN nodes(path) AS ns
           UNION
           WITH center
-          MATCH path = (caller:Method {repo_id: $repo_id})-[:CALLS*1..$depth]->(center)
+          MATCH path = (caller:Method {{repo_id: $repo_id}})-[:CALLS*1..{depth}]->(center)
           RETURN nodes(path) AS ns
-        }
+        }}
         UNWIND ns AS n
         WITH DISTINCT n
         RETURN
@@ -68,22 +69,22 @@ async def get_method_graph(
           coalesce(n.pagerank, 0.0) AS pagerank,
           size([(n)<-[:CALLS]-() | 1]) AS in_degree
         """,
-        {"symbol_id": symbol_id, "repo_id": repo_id, "depth": depth},
+        {"symbol_id": symbol_id, "repo_id": repo_id},
     )
 
     edge_rows = await run_query(
-        """
-        MATCH (center:Method {id: $symbol_id})
-        CALL {
+        f"""
+        MATCH (center:Method {{id: $symbol_id}})
+        CALL {{
           WITH center
-          MATCH (a:Method {repo_id: $repo_id})-[r:CALLS]->(b:Method {repo_id: $repo_id})
-          WHERE (center)-[:CALLS*0..$depth]->(a) OR (a)-[:CALLS*0..$depth]->(center)
-             OR (center)-[:CALLS*0..$depth]->(b) OR (b)-[:CALLS*0..$depth]->(center)
+          MATCH (a:Method {{repo_id: $repo_id}})-[r:CALLS]->(b:Method {{repo_id: $repo_id}})
+          WHERE (center)-[:CALLS*0..{depth}]->(a) OR (a)-[:CALLS*0..{depth}]->(center)
+             OR (center)-[:CALLS*0..{depth}]->(b) OR (b)-[:CALLS*0..{depth}]->(center)
           RETURN a.id AS src, b.id AS tgt, r.confidence AS conf, r.call_count AS cnt
-        }
+        }}
         RETURN DISTINCT src, tgt, conf, cnt
         """,
-        {"symbol_id": symbol_id, "repo_id": repo_id, "depth": depth},
+        {"symbol_id": symbol_id, "repo_id": repo_id},
     )
 
     nodes = [
@@ -134,9 +135,9 @@ async def get_impact(
     max_depth = min(max_depth, 5)
 
     rows = await run_query(
-        """
-        MATCH (target:Method {id: $symbol_id})
-        MATCH path = (caller:Method {repo_id: $repo_id})-[:CALLS*1..$depth]->(target)
+        f"""
+        MATCH (target:Method {{id: $symbol_id}})
+        MATCH path = (caller:Method {{repo_id: $repo_id}})-[:CALLS*1..{max_depth}]->(target)
         WITH caller, length(path) AS hop
         RETURN DISTINCT
           caller.id          AS id,
@@ -151,19 +152,19 @@ async def get_impact(
         ORDER BY depth ASC, pagerank DESC
         LIMIT 100
         """,
-        {"symbol_id": symbol_id, "repo_id": repo_id, "depth": max_depth},
+        {"symbol_id": symbol_id, "repo_id": repo_id},
     )
 
     edge_rows = await run_query(
-        """
-        MATCH (target:Method {id: $symbol_id})
-        MATCH (a:Method {repo_id: $repo_id})-[r:CALLS]->(b:Method {repo_id: $repo_id})
-        WHERE (a)-[:CALLS*1..$depth]->(target) AND (b)-[:CALLS*0..$depth]->(target)
+        f"""
+        MATCH (target:Method {{id: $symbol_id}})
+        MATCH (a:Method {{repo_id: $repo_id}})-[r:CALLS]->(b:Method {{repo_id: $repo_id}})
+        WHERE (a)-[:CALLS*1..{max_depth}]->(target) AND (b)-[:CALLS*0..{max_depth}]->(target)
         RETURN DISTINCT a.id AS src, b.id AS tgt,
                r.confidence AS conf, r.call_count AS cnt
         LIMIT 200
         """,
-        {"symbol_id": symbol_id, "repo_id": repo_id, "depth": max_depth},
+        {"symbol_id": symbol_id, "repo_id": repo_id},
     )
 
     nodes = [
@@ -273,21 +274,20 @@ async def get_call_path(
     from_symbol_id: str,
     to_symbol_id: str,
 ) -> PathResponse:
-    """查找两个方法之间的最短调用路径"""
+    """查找两个方法之间的最短调用路径。以列表形式返回有序节点，不用 DISTINCT 以保留路径顺序。"""
     rows = await run_query(
         """
         MATCH (from:Method {id: $from_id}),
               (to:Method   {id: $to_id})
         MATCH path = shortestPath((from)-[:CALLS*1..8]->(to))
-        UNWIND nodes(path) AS n
-        RETURN DISTINCT
-          n.id         AS id,
-          n.name       AS name,
-          n.class_name AS class_name,
-          n.file_path  AS file_path,
-          n.line_start AS line_start,
-          n.line_end   AS line_end,
-          length(path) AS path_length
+        WITH nodes(path) AS ns, length(path) AS path_length
+        RETURN
+          [n IN ns | {
+            id: n.id, name: n.name, class_name: n.class_name,
+            file_path: n.file_path, line_start: n.line_start, line_end: n.line_end
+          }] AS path_nodes,
+          path_length
+        LIMIT 1
         """,
         {"from_id": from_symbol_id, "to_id": to_symbol_id},
     )
@@ -305,18 +305,18 @@ async def get_call_path(
     path_length = rows[0].get("path_length") or 0
     nodes = [
         GraphNode(
-            id         = r["id"],
-            name       = r.get("name") or "",
-            class_name = r.get("class_name"),
-            file_path  = r.get("file_path") or "",
-            line_start = r.get("line_start"),
-            line_end   = r.get("line_end"),
+            id         = n["id"],
+            name       = n.get("name") or "",
+            class_name = n.get("class_name"),
+            file_path  = n.get("file_path") or "",
+            line_start = n.get("line_start"),
+            line_end   = n.get("line_end"),
             node_type  = "method",
         )
-        for r in rows
+        for n in (rows[0].get("path_nodes") or [])
     ]
 
-    # 重建边（顺序相邻节点之间）
+    # 路径节点有序，直接按顺序重建边
     edges = [
         GraphEdge(source=nodes[i].id, target=nodes[i + 1].id)
         for i in range(len(nodes) - 1)

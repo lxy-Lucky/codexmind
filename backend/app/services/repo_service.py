@@ -90,7 +90,7 @@ def scan_file_tree(
         return []
 
     for entry in entries:
-        if entry.name.startswith(".") and entry.name in SKIP_FILES:
+        if entry.name in SKIP_FILES:
             continue
         if entry.is_dir() and entry.name in SKIP_DIRS:
             continue
@@ -156,8 +156,8 @@ async def read_file_content(root: Path, rel_path: str) -> FileContentResponse:
     """读取单个文件内容，验证路径安全性"""
     full_path = (root / rel_path).resolve()
 
-    # 安全检查：不允许路径逃逸
-    if not str(full_path).startswith(str(root.resolve())):
+    # 安全检查：不允许路径逃逸（用 is_relative_to 而非 startswith，避免前缀误判）
+    if not full_path.is_relative_to(root.resolve()):
         raise PermissionError(f"路径逃逸: {rel_path}")
 
     if not full_path.exists():

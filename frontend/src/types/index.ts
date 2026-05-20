@@ -97,6 +97,7 @@ export interface AnalysisRequest {
   code: string
   mode: AnalysisMode
   custom_prompt?: string
+  symbol_id?: string
 }
 
 export interface BugItem {

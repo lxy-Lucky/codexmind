@@ -71,6 +71,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
         line_end:   sel.lineEnd,
         code:       sel.code,
         mode:       targetMode,
+        symbol_id:  currentSymbolId.value || undefined,
       },
       (text) => { if (targetMode === 'bug') rawBuf += text; else streamingText.value += text },
       (ev: SSEChunk) => {

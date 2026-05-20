@@ -10,6 +10,7 @@ Search Service v2
   Layer 4 - 综合 Rerank
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -379,29 +380,29 @@ async def semantic_search(req: SearchRequest, db: aiosqlite.Connection) -> Searc
                               query=req.query, intent=intent.intent)
 
     # Layer 2：双通道检索
-    # 中文查询：LLM 展开（懒加载）与向量检索并行，不阻塞主路径
+    # 中文查询：LLM 展开与向量检索并行，不阻塞主路径
     llm_task = None
     if _needs_llm_expansion(req.query):
-        import asyncio as _asyncio
-        llm_task = _asyncio.create_task(_expand_query_with_llm(req.query))
+        llm_task = asyncio.create_task(_expand_query_with_llm(req.query))
 
-    # 向量检索用 instruction 前缀增强的文本
     dense_results = await _dense_search(
         intent.embed_query_text(), req.repo_id, fetch_k, req.language_filter
     )
 
-    # 等 LLM 展开结果（最多等 5s，超时就用空）
     if llm_task is not None:
-        import asyncio as _asyncio
         try:
-            intent.llm_expansion = await _asyncio.wait_for(llm_task, timeout=5.0)
+            intent.llm_expansion = await asyncio.wait_for(llm_task, timeout=5.0)
             if intent.llm_expansion:
                 logger.info("LLM expansion: %r → %r", req.query, intent.llm_expansion)
-        except _asyncio.TimeoutError:
+        except asyncio.TimeoutError:
             logger.debug("LLM expansion timeout, skipping")
             intent.llm_expansion = ""
 
-    sparse_results = _sparse_search(intent.build_bm25_query(), req.repo_id, fetch_k)
+    # BM25 可能触发 pickle 磁盘加载（同步阻塞），放入线程池避免阻塞事件循环
+    loop = asyncio.get_running_loop()
+    sparse_results = await loop.run_in_executor(
+        None, _sparse_search, intent.build_bm25_query(), req.repo_id, fetch_k
+    )
     candidates     = _rrf_merge(dense_results, sparse_results)
 
     # 拉取所有候选的 payload（从 Qdrant）

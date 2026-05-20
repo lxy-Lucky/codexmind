@@ -42,16 +42,15 @@ def _count_tokens(text: str) -> int:
 
 @lru_cache(maxsize=None)
 def _get_parser(language: str) -> Optional[Any]:
+    """仅支持 Java 和 JS/TS（XML 走 sliding-window fallback，无需 parser）"""
     try:
-        import tree_sitter_java, tree_sitter_python
-        import tree_sitter_javascript, tree_sitter_typescript, tree_sitter_go
+        import tree_sitter_java
+        import tree_sitter_javascript, tree_sitter_typescript
         from tree_sitter import Language, Parser
         lang_map = {
             "java":       tree_sitter_java.language(),
-            "python":     tree_sitter_python.language(),
             "javascript": tree_sitter_javascript.language(),
             "typescript": tree_sitter_typescript.language_typescript(),
-            "go":         tree_sitter_go.language(),
         }
         if language not in lang_map:
             return None
@@ -63,10 +62,8 @@ def _get_parser(language: str) -> Optional[Any]:
 
 NODE_TYPES: dict[str, list[str]] = {
     "java":       ["method_declaration", "constructor_declaration", "class_declaration"],
-    "python":     ["function_definition", "async_function_definition", "class_definition"],
     "javascript": ["function_declaration", "arrow_function", "method_definition", "class_declaration"],
     "typescript": ["function_declaration", "arrow_function", "method_definition", "class_declaration"],
-    "go":         ["function_declaration", "method_declaration"],
 }
 
 # ── 正则 fallback ──────────────────────────────────────────────────────────────
@@ -104,8 +101,8 @@ def _extract_calls_from_tree(tree, source: str, language: str) -> list[str]:
 
     if language == "java":
         _walk_java_calls(tree.root_node, source, calls)
-    elif language == "python":
-        _walk_python_calls(tree.root_node, source, calls)
+    elif language in ("javascript", "typescript"):
+        _walk_js_calls(tree.root_node, source, calls)
 
     return list(dict.fromkeys(calls))  # 去重保序
 
@@ -125,16 +122,24 @@ def _walk_java_calls(node, source: str, out: list[str]) -> None:
         _walk_java_calls(child, source, out)
 
 
-def _walk_python_calls(node, source: str, out: list[str]) -> None:
-    if node.type == "call":
+def _walk_js_calls(node, source: str, out: list[str]) -> None:
+    """提取 JS/TS 调用：member_expression（obj.method）和直接 identifier 调用"""
+    if node.type == "call_expression":
         func = node.child_by_field_name("function")
         if func:
-            text = source[func.start_byte:func.end_byte]
-            # 只取最后两段（避免 a.b.c.d 过长）
-            parts = text.split(".")
-            out.append(".".join(parts[-2:]) if len(parts) >= 2 else text)
+            if func.type == "member_expression":
+                obj  = func.child_by_field_name("object")
+                prop = func.child_by_field_name("property")
+                if obj and prop:
+                    obj_text  = source[obj.start_byte:obj.end_byte]
+                    prop_text = source[prop.start_byte:prop.end_byte]
+                    # 只取对象最后一段，避免链式调用过长
+                    obj_last = obj_text.split(".")[-1]
+                    out.append(f"{obj_last}.{prop_text}")
+            elif func.type == "identifier":
+                out.append(source[func.start_byte:func.end_byte])
     for child in node.children:
-        _walk_python_calls(child, source, out)
+        _walk_js_calls(child, source, out)
 
 
 # ── 注解提取 ──────────────────────────────────────────────────────────────────
@@ -339,10 +344,8 @@ def _regex_parse_chunks(source: str, language: str, file_path: str) -> list[dict
     lines = source.splitlines()
     n = len(lines)
 
-    if language in ("java", "kotlin", "csharp", "scala"):
+    if language == "java":
         pattern, sym_group = _JAVA_METHOD_RE, 2
-    elif language == "python":
-        pattern, sym_group = _PYTHON_DEF_RE, 3
     elif language in ("javascript", "typescript"):
         pattern, sym_group = _JS_FUNC_RE, 2
     else:

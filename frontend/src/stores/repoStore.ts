@@ -12,6 +12,8 @@ export const useRepoStore = defineStore('repo', () => {
   const indexing     = ref(false)
   const indexProgress = ref<IndexProgress | null>(null)
 
+  let _pollTimer: ReturnType<typeof setInterval> | null = null
+
   // ── Getters ────────────────────────────────────────────────────────────────
   const hasRepo     = computed(() => !!currentRepo.value)
   const isIndexDone = computed(() => currentRepo.value?.indexed === 2)
@@ -55,25 +57,35 @@ export const useRepoStore = defineStore('repo', () => {
     fileTree.value = await repoApi.fileTree(currentRepo.value.id)
   }
 
+  function stopPolling() {
+    if (_pollTimer !== null) {
+      clearInterval(_pollTimer)
+      _pollTimer = null
+    }
+  }
+
   async function triggerIndex() {
     if (!currentRepo.value) return
+    stopPolling()
     indexing.value = true
     indexProgress.value = await repoApi.triggerIndex(currentRepo.value.id)
 
-    // 轮询索引进度
-    const poll = setInterval(async () => {
-      if (!currentRepo.value) { clearInterval(poll); return }
-      const prog = await repoApi.indexStatus(currentRepo.value.id)
-      indexProgress.value = prog
-      // 同步 repo 状态
-      const idx = repos.value.findIndex(r => r.id === currentRepo.value!.id)
-      if (idx !== -1) repos.value[idx].indexed = prog.status as IndexStatus
+    _pollTimer = setInterval(async () => {
+      if (!currentRepo.value) { stopPolling(); return }
+      try {
+        const prog = await repoApi.indexStatus(currentRepo.value.id)
+        indexProgress.value = prog
+        const idx = repos.value.findIndex(r => r.id === currentRepo.value!.id)
+        if (idx !== -1) repos.value[idx].indexed = prog.status as IndexStatus
 
-      if (prog.status === 2 || prog.status === 3) {
-        clearInterval(poll)
-        indexing.value = false
-        // 刷新 repo 详情
-        currentRepo.value = await repoApi.get(currentRepo.value.id)
+        if (prog.status === 2 || prog.status === 3) {
+          stopPolling()
+          indexing.value = false
+          currentRepo.value = await repoApi.get(currentRepo.value.id)
+        }
+      } catch (e) {
+        // 轮询失败不立即停止，等待下一次尝试
+        console.warn('Index status poll error:', e)
       }
     }, 2000)
   }
@@ -91,6 +103,6 @@ export const useRepoStore = defineStore('repo', () => {
     repos, currentRepo, fileTree, loading, indexing, indexProgress,
     hasRepo, isIndexDone,
     fetchRepos, registerRepo, selectRepo, fetchFileTree,
-    triggerIndex, removeRepo,
+    triggerIndex, stopPolling, removeRepo,
   }
 })

@@ -4,10 +4,13 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# backend/.env —— 相对于本模块文件位置解析，不依赖 CWD
+_ENV_FILE = Path(__file__).parent.parent.parent / ".env"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file="../../.env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -42,7 +45,7 @@ class Settings(BaseSettings):
     # ── Indexer ─────────────────────────────────────
     CHUNK_MAX_TOKENS: int = 512
     CHUNK_OVERLAP_TOKENS: int = 64
-    SUPPORTED_EXTENSIONS: str = ".java,.ts,.js,.vue,.xml,.jsp"
+    SUPPORTED_EXTENSIONS: str = ".java,.js,.ts,.jsx,.tsx,.vue,.xml"
 
     # ── BM25 ────────────────────────────────────────
     BM25_INDEX_DIR: Path = Path("./data/bm25")
@@ -80,6 +83,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-settings.SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
-settings.BM25_INDEX_DIR.mkdir(parents=True, exist_ok=True)

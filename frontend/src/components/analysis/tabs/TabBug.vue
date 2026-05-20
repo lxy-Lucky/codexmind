@@ -25,20 +25,6 @@ const SEV_CONFIG = {
         <span class="text-amber">{{ analysis.bugItems.filter(b=>b.severity==='Warning').length }} Warning</span>
       </div>
 
-      <!-- 调用链风险提示 -->
-      <div
-        v-if="analysis.currentCallers?.length"
-        class="rounded-lg border border-amber/20 bg-amber/5 p-3 font-mono text-[11px]"
-      >
-        <span class="text-amber">⚡ 调用链风险：</span>
-        <span class="text-text-secondary">
-          此方法被 {{ analysis.currentCallers.length }} 个方法调用
-          （{{ analysis.currentCallers.map(c => c.method_name).slice(0,3).join('、') }}
-          {{ analysis.currentCallers.length > 3 ? '等' : '' }}），
-          Critical 问题会向上传播。
-        </span>
-      </div>
-
       <div
         v-for="(bug, idx) in analysis.bugItems" :key="idx"
         class="rounded-lg border p-3.5 animate-fade-in"

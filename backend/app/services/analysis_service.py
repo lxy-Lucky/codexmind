@@ -138,10 +138,13 @@ _PROMPTS = {
 ```
 """,
 
-    # deps 模式不走 LLM，直接用 graph_service 数据，此模板保留备用
     "deps": """\
-分析以下代码的依赖关系，输出 Mermaid flowchart LR。
-只输出 mermaid 代码块。
+你是一位架构分析专家。分析以下代码的调用链和依赖关系，输出 **Mermaid flowchart LR** 格式。
+
+要求：
+- 包含方法调用关系（A --> B）
+- 外部依赖用不同形状标注（DB 用圆柱 [( )]，HTTP 用菱形 {{ }}）
+- 只输出 mermaid 代码块，不要其他文字
 
 {call_context}
 

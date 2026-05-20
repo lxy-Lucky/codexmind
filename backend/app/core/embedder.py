@@ -47,7 +47,7 @@ def embed_sync(texts: list[str]) -> list[list[float]]:
 
 async def embed(texts: list[str]) -> list[list[float]]:
     """异步 embedding：把同步调用推入线程池，不阻塞事件循环"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, embed_sync, texts)
 
 

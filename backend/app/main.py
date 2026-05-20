@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("=== CodexMind Backend v2 starting ===")
 
+    # 确保数据目录存在（移出 config 模块，避免 import 时副作用）
+    settings.SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    settings.BM25_INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
     await init_db()
 
     # Qdrant
@@ -64,10 +68,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins     = ["*"],
-    allow_credentials = True,
-    allow_methods     = ["*"],
-    allow_headers     = ["*"],
+    allow_origins  = ["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173"],
+    allow_methods  = ["*"],
+    allow_headers  = ["*"],
 )
 
 app.include_router(repo.router)

@@ -234,9 +234,11 @@ async def _pass2_call_graph(
 
 
 async def _compute_pagerank(repo_id: str) -> None:
-    """用 Neo4j GDS 计算 PageRank 并写回节点属性，再同步到 SQLite"""
+    """用 Neo4j GDS 计算 PageRank 并写回节点属性。用 try/finally 确保投影始终被清理，
+    防止重复索引时因投影残留而报 'graph already exists' 错误。"""
+    graph_name = f"cg_{repo_id[:8]}"
+    projected = False
     try:
-        # 建临时图投影
         await run_write(
             """
             CALL gds.graph.project.cypher(
@@ -247,9 +249,9 @@ async def _compute_pagerank(repo_id: str) -> None:
               {parameters: {repo_id: $repo_id}}
             )
             """,
-            {"graph_name": f"cg_{repo_id[:8]}", "repo_id": repo_id},
+            {"graph_name": graph_name, "repo_id": repo_id},
         )
-        # 写回 pagerank 属性
+        projected = True
         await run_write(
             """
             CALL gds.pageRank.write($graph_name, {
@@ -258,16 +260,17 @@ async def _compute_pagerank(repo_id: str) -> None:
               writeProperty: 'pagerank'
             })
             """,
-            {"graph_name": f"cg_{repo_id[:8]}"},
-        )
-        # 删除图投影
-        await run_write(
-            "CALL gds.graph.drop($graph_name)",
-            {"graph_name": f"cg_{repo_id[:8]}"},
+            {"graph_name": graph_name},
         )
         logger.info("[%s] PageRank computed", repo_id)
     except Exception as e:
         logger.warning("[%s] PageRank failed (GDS not available?): %s", repo_id, e)
+    finally:
+        if projected:
+            try:
+                await run_write("CALL gds.graph.drop($graph_name)", {"graph_name": graph_name})
+            except Exception:
+                pass
 
 
 # ── Pass 3：embed + Qdrant + BM25 ─────────────────────────────────────────────

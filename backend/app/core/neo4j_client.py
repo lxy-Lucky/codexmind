@@ -85,19 +85,24 @@ async def run_query(cypher: str, params: dict | None = None) -> list[dict]:
 
 
 async def run_write(cypher: str, params: dict | None = None) -> None:
-    """执行写操作 Cypher（MERGE / CREATE / SET）"""
+    """执行写操作 Cypher（MERGE / CREATE / SET），使用显式写事务保证原子性"""
+    _params = params or {}
     driver = get_neo4j()
     async with driver.session() as session:
-        await session.run(cypher, params or {})
+        async def _work(tx):
+            await tx.run(cypher, _params)
+        await session.execute_write(_work)
 
 
 async def run_write_batch(cypher: str, batch: list[dict]) -> None:
     """
-    批量写入。
+    批量写入，使用显式写事务。
     cypher 应使用 UNWIND $rows AS row ... 模式。
     """
     if not batch:
         return
     driver = get_neo4j()
     async with driver.session() as session:
-        await session.run(cypher, {"rows": batch})
+        async def _work(tx):
+            await tx.run(cypher, {"rows": batch})
+        await session.execute_write(_work)

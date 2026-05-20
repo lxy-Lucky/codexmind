@@ -42,23 +42,28 @@ async def get_method_graph(
     """
     以 symbol_id 为中心，展开 depth 跳的调用图（双向：调用者 + 被调用者）。
     注意：Cypher 变长路径范围不接受参数，depth 直接格式化进查询字符串。
-    """
-    depth = min(depth, 4)  # 最多 4 跳，防止图爆炸
 
+    两步策略：
+      Step 1 - 路径遍历收集所有相关节点（有深度上限，结果集小）
+      Step 2 - 用节点 ID 集合查边（索引扫描，无路径遍历，快几个数量级）
+    """
+    depth = min(depth, 5)
+
+    # Step 1：收集 depth 跳内所有节点
     rows = await run_query(
         f"""
         MATCH (center:Method {{id: $symbol_id}})
         CALL {{
           WITH center
-          MATCH path = (center)-[:CALLS*0..{depth}]->(callee:Method {{repo_id: $repo_id}})
-          RETURN nodes(path) AS ns
+          MATCH (center)-[:CALLS*0..{depth}]->(n:Method {{repo_id: $repo_id}})
+          RETURN n
           UNION
           WITH center
-          MATCH path = (caller:Method {{repo_id: $repo_id}})-[:CALLS*1..{depth}]->(center)
-          RETURN nodes(path) AS ns
+          MATCH (n:Method {{repo_id: $repo_id}})-[:CALLS*1..{depth}]->(center)
+          RETURN n
         }}
-        UNWIND ns AS n
         WITH DISTINCT n
+        WHERE n IS NOT NULL
         RETURN
           n.id          AS id,
           n.name        AS name,
@@ -68,24 +73,23 @@ async def get_method_graph(
           n.line_end    AS line_end,
           coalesce(n.pagerank, 0.0) AS pagerank,
           size([(n)<-[:CALLS]-() | 1]) AS in_degree
+        LIMIT 300
         """,
         {"symbol_id": symbol_id, "repo_id": repo_id},
     )
 
+    node_ids = [r["id"] for r in rows if r.get("id")]
+
+    # Step 2：在节点 ID 集合内查边（索引扫描，O(|node_ids|²) 但 node_ids 很小）
     edge_rows = await run_query(
-        f"""
-        MATCH (center:Method {{id: $symbol_id}})
-        CALL {{
-          WITH center
-          MATCH (a:Method {{repo_id: $repo_id}})-[r:CALLS]->(b:Method {{repo_id: $repo_id}})
-          WHERE (center)-[:CALLS*0..{depth}]->(a) OR (a)-[:CALLS*0..{depth}]->(center)
-             OR (center)-[:CALLS*0..{depth}]->(b) OR (b)-[:CALLS*0..{depth}]->(center)
-          RETURN a.id AS src, b.id AS tgt, r.confidence AS conf, r.call_count AS cnt
-        }}
-        RETURN DISTINCT src, tgt, conf, cnt
+        """
+        MATCH (a:Method)-[r:CALLS]->(b:Method)
+        WHERE a.id IN $node_ids AND b.id IN $node_ids
+        RETURN DISTINCT a.id AS src, b.id AS tgt,
+               r.confidence AS conf, r.call_count AS cnt
         """,
-        {"symbol_id": symbol_id, "repo_id": repo_id},
-    )
+        {"node_ids": node_ids},
+    ) if node_ids else []
 
     nodes = [
         GraphNode(
@@ -155,17 +159,18 @@ async def get_impact(
         {"symbol_id": symbol_id, "repo_id": repo_id},
     )
 
+    # Collect node IDs from the caller rows + the target itself for edge lookup
+    impact_node_ids = [r["id"] for r in rows if r.get("id")] + [symbol_id]
+
     edge_rows = await run_query(
-        f"""
-        MATCH (target:Method {{id: $symbol_id}})
-        MATCH (a:Method {{repo_id: $repo_id}})-[r:CALLS]->(b:Method {{repo_id: $repo_id}})
-        WHERE (a)-[:CALLS*1..{max_depth}]->(target) AND (b)-[:CALLS*0..{max_depth}]->(target)
+        """
+        MATCH (a:Method)-[r:CALLS]->(b:Method)
+        WHERE a.id IN $node_ids AND b.id IN $node_ids
         RETURN DISTINCT a.id AS src, b.id AS tgt,
                r.confidence AS conf, r.call_count AS cnt
-        LIMIT 200
         """,
-        {"symbol_id": symbol_id, "repo_id": repo_id},
-    )
+        {"node_ids": impact_node_ids},
+    ) if impact_node_ids else []
 
     nodes = [
         GraphNode(
@@ -210,9 +215,9 @@ async def get_class_graph(repo_id: str, class_name: str | None = None) -> GraphR
     class_name 为 None 时返回整个 repo 的类图。
     """
     params: dict = {"repo_id": repo_id}
-    where_clause = ""
+    class_filter = ""
     if class_name:
-        where_clause = "WHERE c1.name = $class_name OR c2.name = $class_name"
+        class_filter = "AND (c1.name = $class_name OR c2.name = $class_name)"
         params["class_name"] = class_name
 
     rows = await run_query(
@@ -221,7 +226,7 @@ async def get_class_graph(repo_id: str, class_name: str | None = None) -> GraphR
         MATCH (m1)-[:BELONGS_TO]->(c1:Class {{repo_id: $repo_id}})
         MATCH (m2)-[:BELONGS_TO]->(c2:Class {{repo_id: $repo_id}})
         WHERE c1 <> c2
-        {where_clause}
+        {class_filter}
         WITH c1, c2, count(*) AS weight
         RETURN
           c1.id        AS src_id,

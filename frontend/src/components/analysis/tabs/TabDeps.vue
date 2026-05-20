@@ -2,19 +2,17 @@
   <div class="tab-deps">
     <!-- 工具栏 -->
     <div class="deps-toolbar">
-      <div class="view-switcher">
-        <button
-          v-for="v in views"
-          :key="v.key"
-          :class="['view-btn', { active: activeView === v.key }]"
-          @click="switchView(v.key)"
-        >{{ v.label }}</button>
+      <div class="view-select-wrap">
+        <select class="view-select" v-model="activeView" @change="loadGraph">
+          <option v-for="v in views" :key="v.key" :value="v.key">{{ v.label }}</option>
+        </select>
+        <span class="view-select-arrow">▾</span>
       </div>
       <div class="depth-control" v-if="activeView !== 'class'">
         <span class="depth-label">深度</span>
         <button @click="changeDepth(-1)" :disabled="depth <= 1">−</button>
         <span class="depth-val">{{ depth }}</span>
-        <button @click="changeDepth(1)" :disabled="depth >= 4">+</button>
+        <button @click="changeDepth(1)" :disabled="depth >= 5">+</button>
       </div>
       <div class="legend">
         <span class="dot controller">Controller</span>
@@ -240,7 +238,7 @@ function switchView(v: ViewKey) {
 }
 
 function changeDepth(delta: number) {
-  depth.value = Math.max(1, Math.min(4, depth.value + delta))
+  depth.value = Math.max(1, Math.min(5, depth.value + delta))
   loadGraph()
 }
 
@@ -274,21 +272,31 @@ onUnmounted(() => { simulation?.stop() })
   flex-shrink: 0;
 }
 
-.view-switcher { display: flex; gap: 4px; }
-.view-btn {
-  padding: 4px 12px;
+.view-select-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.view-select {
+  padding: 4px 26px 4px 10px;
   border-radius: 6px;
   border: 1px solid var(--border, #1e293b);
-  background: transparent;
-  color: var(--text-secondary, #94a3b8);
+  background: var(--bg-deep, #0f172a);
+  color: #fff;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
 }
-.view-btn.active, .view-btn:hover {
-  background: var(--accent, #6366f1);
-  color: #fff;
-  border-color: transparent;
+.view-select:focus { border-color: var(--accent, #6366f1); }
+.view-select-arrow {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+  color: var(--text-secondary, #94a3b8);
+  font-size: 10px;
+  line-height: 1;
 }
 
 .depth-control {

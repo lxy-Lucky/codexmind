@@ -44,18 +44,42 @@ EXT_TO_LANG: dict[str, str] = {
     ".sh":    "bash",
 }
 
-# 永远跳过的目录名
+# 永远跳过的目录名（所有语言通用）
 SKIP_DIRS: set[str] = {
+    # VCS
     ".git", ".svn", ".hg",
-    "node_modules", "__pycache__", ".venv", "venv", "env",
+    # Node / 前端包管理
+    "node_modules", "bower_components", "jspm_packages",
+    # Python
+    "__pycache__", ".venv", "venv", "env", "site-packages", ".tox", ".nox",
+    # 构建 / 输出 / IDE
     "target", "build", "dist", ".gradle", ".idea", ".vscode",
     "out", "bin", ".cache", ".mypy_cache", ".pytest_cache",
+    "cmake-build-debug", "cmake-build-release",
+    # 第三方库 / vendor（跨语言）
+    "vendor", "vendors",          # PHP Composer / Go / Ruby / 通用
+    "third_party", "thirdparty",  # C++ / 通用
+    "external", "externals",
+    "deps",                        # Elixir mix deps
+    # iOS / macOS
+    "Pods", "Carthage",
+    # Ruby
+    ".bundle",
+    # Java web 内嵌资源（Bootstrap / jQuery 等打包进 jar 的静态文件）
+    "webjars",
 }
 
-# 永远跳过的文件名
+# 永远跳过的文件名（精确匹配文件名）
 SKIP_FILES: set[str] = {
     ".DS_Store", "Thumbs.db", ".gitignore", ".gitattributes",
 }
+
+# 跳过的文件名后缀（含这些后缀的视为压缩/打包库文件，不参与索引）
+SKIP_SUFFIXES: tuple[str, ...] = (
+    ".min.js", ".min.css",
+    ".bundle.js", ".chunk.js",
+    "-min.js", "-min.css",
+)
 
 
 def get_language(path: Path) -> Optional[str]:

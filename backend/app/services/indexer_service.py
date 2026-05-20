@@ -25,7 +25,7 @@ from app.core.embedder import embed
 from app.core.qdrant_client import get_qdrant, ensure_collection, collection_name
 from app.core.neo4j_client import run_write, run_write_batch, run_query
 from app.core.bm25_index import BM25Index, save_bm25, invalidate_bm25
-from app.services.repo_service import SKIP_DIRS, get_language
+from app.services.repo_service import SKIP_DIRS, SKIP_SUFFIXES, get_language
 from app.services.parser_service import parse_chunks
 
 logger = logging.getLogger(__name__)
@@ -445,11 +445,26 @@ def _iter_code_files(root: Path) -> Iterator[tuple[Path, str, str]]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for fname in filenames:
+            # 跳过压缩 / 打包库文件（bootstrap.min.js、vendor.chunk.js 等）
+            fname_lower = fname.lower()
+            if any(fname_lower.endswith(s) for s in SKIP_SUFFIXES):
+                continue
+
             fpath = Path(dirpath) / fname
             lang = get_language(fpath)
-            if lang and fpath.suffix.lower() in settings.supported_ext_set:
-                rel = str(fpath.relative_to(root))
-                yield fpath, rel, lang
+            if not (lang and fpath.suffix.lower() in settings.supported_ext_set):
+                continue
+
+            # 跳过超大文件（>500KB）：通常是打包产物或自动生成代码
+            try:
+                if fpath.stat().st_size > 500_000:
+                    logger.debug("Skip large file (%d bytes): %s", fpath.stat().st_size, fpath)
+                    continue
+            except OSError:
+                continue
+
+            rel = str(fpath.relative_to(root))
+            yield fpath, rel, lang
 
 
 async def _cleanup_old_data(db: aiosqlite.Connection, repo_id: str) -> None:

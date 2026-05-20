@@ -95,34 +95,34 @@ _JS_FUNC_RE = re.compile(
 
 # ── 调用提取（tree-sitter method_invocation）─────────────────────────────────
 
-def _extract_calls_from_tree(tree, source: str, language: str) -> list[str]:
+def _extract_calls_from_tree(tree, src: bytes, language: str) -> list[str]:
     """从 AST 提取方法调用，返回 'ClassName.methodName' 或 'methodName' 列表"""
     calls: list[str] = []
 
     if language == "java":
-        _walk_java_calls(tree.root_node, source, calls)
+        _walk_java_calls(tree.root_node, src, calls)
     elif language in ("javascript", "typescript"):
-        _walk_js_calls(tree.root_node, source, calls)
+        _walk_js_calls(tree.root_node, src, calls)
 
     return list(dict.fromkeys(calls))  # 去重保序
 
 
-def _walk_java_calls(node, source: str, out: list[str]) -> None:
+def _walk_java_calls(node, src: bytes, out: list[str]) -> None:
     if node.type == "method_invocation":
         # object.method() 或 method()
         children = list(node.children)
         names = [c for c in children if c.type == "identifier"]
         if len(names) >= 2:
-            obj = source[names[0].start_byte:names[0].end_byte]
-            method = source[names[1].start_byte:names[1].end_byte]
+            obj    = src[names[0].start_byte:names[0].end_byte].decode("utf-8", "replace")
+            method = src[names[1].start_byte:names[1].end_byte].decode("utf-8", "replace")
             out.append(f"{obj}.{method}")
         elif len(names) == 1:
-            out.append(source[names[0].start_byte:names[0].end_byte])
+            out.append(src[names[0].start_byte:names[0].end_byte].decode("utf-8", "replace"))
     for child in node.children:
-        _walk_java_calls(child, source, out)
+        _walk_java_calls(child, src, out)
 
 
-def _walk_js_calls(node, source: str, out: list[str]) -> None:
+def _walk_js_calls(node, src: bytes, out: list[str]) -> None:
     """提取 JS/TS 调用：member_expression（obj.method）和直接 identifier 调用"""
     if node.type == "call_expression":
         func = node.child_by_field_name("function")
@@ -131,15 +131,14 @@ def _walk_js_calls(node, source: str, out: list[str]) -> None:
                 obj  = func.child_by_field_name("object")
                 prop = func.child_by_field_name("property")
                 if obj and prop:
-                    obj_text  = source[obj.start_byte:obj.end_byte]
-                    prop_text = source[prop.start_byte:prop.end_byte]
-                    # 只取对象最后一段，避免链式调用过长
+                    obj_text  = src[obj.start_byte:obj.end_byte].decode("utf-8", "replace")
+                    prop_text = src[prop.start_byte:prop.end_byte].decode("utf-8", "replace")
                     obj_last = obj_text.split(".")[-1]
                     out.append(f"{obj_last}.{prop_text}")
             elif func.type == "identifier":
-                out.append(source[func.start_byte:func.end_byte])
+                out.append(src[func.start_byte:func.end_byte].decode("utf-8", "replace"))
     for child in node.children:
-        _walk_js_calls(child, source, out)
+        _walk_js_calls(child, src, out)
 
 
 # ── 注解提取 ──────────────────────────────────────────────────────────────────
@@ -247,18 +246,19 @@ def parse_chunks(source: str, language: str, file_path: str) -> list[dict]:
 # ── tree-sitter 提取 ───────────────────────────────────────────────────────────
 
 def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list[dict]:
+    # tree-sitter 所有偏移量是字节偏移，必须在 bytes 上切片
+    # 行号用 source.splitlines()（字符级），代码体也用行号切，两者互不干扰
+    source_bytes = source.encode("utf-8")
     lines = source.splitlines()
     target_types = NODE_TYPES.get(language, [])
     chunks: list[dict] = []
-    current_class = ""
 
     def walk(node, parent_class: str = ""):
-        nonlocal current_class
         if "class" in node.type and node.type in target_types:
-            # 提取类名
+            # 类名是 identifier 类型的直接子节点，用字节切片保证多字节正确
             for child in node.children:
                 if child.type == "identifier":
-                    parent_class = source[child.start_byte:child.end_byte]
+                    parent_class = source_bytes[child.start_byte:child.end_byte].decode("utf-8", "replace")
                     break
             for child in node.children:
                 walk(child, parent_class)
@@ -268,29 +268,29 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
             line_start = node.start_point[0] + 1
             line_end   = node.end_point[0]   + 1
             raw_code   = "\n".join(lines[line_start - 1: line_end])
-            symbol     = _extract_symbol(node, source)
-            signature  = _extract_signature(node, source, language)
+            symbol     = _extract_symbol(node, source_bytes)
+            signature  = _extract_signature(node, source_bytes, language)
             annotations = _extract_annotations(raw_code)
             comment    = _extract_leading_comment(raw_code)
 
-            # 提取调用
             calls: list[str] = []
             try:
+                raw_bytes = raw_code.encode("utf-8")
                 calls = _extract_calls_from_tree(
-                    _parse_subtree(raw_code, language), raw_code, language
+                    _parse_subtree(raw_bytes, language), raw_bytes, language
                 )
             except Exception:
                 pass
 
             structured = _build_structured_text(
-                raw_code   = raw_code,
-                file_path  = file_path,
-                class_name = parent_class,
+                raw_code    = raw_code,
+                file_path   = file_path,
+                class_name  = parent_class,
                 method_name = symbol,
-                signature  = signature,
+                signature   = signature,
                 annotations = annotations,
-                calls      = calls,
-                comment    = comment,
+                calls       = calls,
+                comment     = comment,
             )
 
             sub = _maybe_split(
@@ -309,31 +309,30 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
     return chunks
 
 
-def _parse_subtree(code: str, language: str):
-    """解析局部代码片段，用于提取调用"""
+def _parse_subtree(code: bytes, language: str):
+    """解析局部代码片段，用于提取调用（接受 bytes 以匹配 tree-sitter 字节偏移）"""
     parser = _get_parser(language)
     if parser is None:
         raise RuntimeError("no parser")
-    return parser.parse(code.encode("utf-8"))
+    return parser.parse(code)
 
 
-def _extract_symbol(node, source: str) -> str:
+def _extract_symbol(node, src: bytes) -> str:
+    """tree-sitter 用字节偏移，必须从 bytes 而非 str 切片，否则多字节字符导致乱码"""
     for child in node.children:
         if child.type == "identifier":
-            return source[child.start_byte:child.end_byte]
+            return src[child.start_byte:child.end_byte].decode("utf-8", "replace")
     return ""
 
 
-def _extract_signature(node, source: str, language: str) -> str:
-    """提取方法签名（不含方法体）"""
+def _extract_signature(node, src: bytes, language: str) -> str:
+    """提取方法签名（不含方法体），从字节流切片避免多字节偏移错误"""
     try:
-        start = node.start_byte
-        # 找第一个 { 的位置
-        text = source[start:]
-        brace_pos = text.find("{")
+        text = src[node.start_byte:]
+        brace_pos = text.find(b"{")
         if brace_pos == -1:
-            return text[:200].strip()
-        return text[:brace_pos].strip()[:200]
+            return text[:200].decode("utf-8", "replace").strip()
+        return text[:brace_pos].decode("utf-8", "replace").strip()[:200]
     except Exception:
         return ""
 

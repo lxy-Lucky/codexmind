@@ -75,6 +75,7 @@ const tabs: Tab[] = [
         :symbolId="analysis.currentSymbolId"
         :className="analysis.currentClassName || undefined"
         :requestedView="analysis.depsView"
+        :reloadTick="analysis.depsReloadTick"
       />
       <TabHistory v-else-if="analysis.activeTab === 'history'" />
       <TabChat    v-else-if="analysis.activeTab === 'chat'" />

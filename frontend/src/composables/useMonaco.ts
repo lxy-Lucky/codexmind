@@ -117,6 +117,8 @@ export function useMonaco(containerRef: Ref<HTMLElement | null>) {
           },
         }])
         editor.revealLineInCenter(s)
+        // 将光标也移到高亮起始行，确保"依赖"按钮能通过光标位置查到正确方法
+        editor.setPosition({ lineNumber: s, column: 1 })
       },
     )
   })

@@ -64,6 +64,7 @@ const props = defineProps<{
   symbolId?: string
   className?: string
   requestedView?: ViewKey   // 由工具栏「依赖」按钮驱动，决定激活哪个子视图
+  reloadTick?: number       // 每次点「依赖」按钮都自增，强制重新加载
 }>()
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -248,6 +249,17 @@ function changeDepth(delta: number) {
 }
 
 // ── Watchers ───────────────────────────────────────────────────────────────
+
+/**
+ * reloadTick 每次点「依赖」按钮都自增。
+ * 即使 symbolId / requestedView 没有变化，也强制重新加载图，
+ * 解决"换了方法再点没反应"的问题。
+ */
+watch(() => props.reloadTick, (tick, oldTick) => {
+  if (tick === oldTick || tick === undefined) return
+  if (props.requestedView) activeView.value = props.requestedView
+  loadGraph()
+})
 
 /**
  * 工具栏「依赖」按钮触发：requestedView 变化时切换子视图并重新加载。

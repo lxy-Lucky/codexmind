@@ -11,7 +11,8 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const activeTab      = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat'>('summary')
   const currentSymbolId  = ref('')
   const currentClassName = ref('')
-  const depsView = ref<'method' | 'class' | 'impact'>('class')  // 依赖图子视图
+  const depsView       = ref<'method' | 'class' | 'impact'>('class')  // 依赖图子视图
+  const depsReloadTick = ref(0)   // 每次点"依赖"都自增，强制 TabDeps 重新加载
   const streaming      = ref(false)
   const streamingText = ref('')
   const bugItems      = ref<BugItem[]>([])
@@ -37,10 +38,12 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   /**
-   * 工具栏「依赖」按钮的专用入口。优先级：
-   *   1. 已有 symbol_id（来自搜索结果点击）→ 方法调用图
-   *   2. 无 symbol_id 但编辑器有光标     → 按行查数据库，找到则方法调用图
-   *   3. 光标不在任何方法内              → 类依赖图（类名从文件名提取）
+   * 工具栏「依赖」按钮的专用入口。每次点击都重新判断当前光标所在方法。
+   * 优先级：
+   *   1. 光标在某个方法内 → 更新 currentSymbolId → 方法调用图
+   *   2. 光标不在方法内但曾有 symbolId → 沿用上次的方法调用图
+   *   3. 都没有 → 类依赖图（类名从文件名提取）
+   * 无论视图是否切换，都会自增 depsReloadTick，强制 TabDeps 重新加载。
    */
   async function openDepsGraph() {
     const editorStore = useEditorStore()
@@ -50,13 +53,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
 
     activeTab.value = 'deps'
 
-    // ① 已有 symbol（搜索结果点击后设置）
-    if (currentSymbolId.value) {
-      depsView.value = 'method'
-      return
-    }
-
-    // ② 尝试从 Monaco 光标位置推断当前方法
+    // 每次点击都从光标位置重新查 symbol（支持换方法后再点击）
     const cursorLine = editorStore.editorInstance?.getPosition()?.lineNumber ?? null
     if (cursorLine && repoStore.currentRepo) {
       try {
@@ -64,16 +61,21 @@ export const useAnalysisStore = defineStore('analysis', () => {
         if (sym?.id) {
           currentSymbolId.value  = sym.id
           currentClassName.value = sym.class_name ?? ''
-          depsView.value = 'method'
-          return
         }
-      } catch { /* 查不到则继续回落 */ }
+      } catch { /* 忽略，使用上次的 symbolId */ }
     }
 
-    // ③ 光标不在任何方法上 → 类依赖图
-    const fileName  = file.path.replace(/\\/g, '/').split('/').pop() ?? ''
-    currentClassName.value = fileName.replace(/\.[^.]+$/, '')
-    depsView.value = 'class'
+    // 决定子视图
+    if (currentSymbolId.value) {
+      depsView.value = 'method'
+    } else {
+      const fileName = file.path.replace(/\\/g, '/').split('/').pop() ?? ''
+      currentClassName.value = fileName.replace(/\.[^.]+$/, '')
+      depsView.value = 'class'
+    }
+
+    // 强制 TabDeps 重新加载（即使 symbolId / view 与上次完全相同）
+    depsReloadTick.value++
   }
 
   function abort() {
@@ -208,7 +210,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   return {
-    activeTab, currentSymbolId, currentClassName, depsView,
+    activeTab, currentSymbolId, currentClassName, depsView, depsReloadTick,
     streaming, streamingText, bugItems,
     confidence, latencyMs, error, hasResult,
     chatHistory, chatStreaming,

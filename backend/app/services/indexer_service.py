@@ -408,16 +408,43 @@ async def _neo4j_create_class_nodes(nodes: list[dict]) -> None:
 
 
 async def _neo4j_link_methods_to_classes(repo_id: str) -> None:
-    """为同 class_name 的 Method 和 Class 建 [:BELONGS_TO] 关系"""
-    await run_write(
-        """
-        MATCH (m:Method {repo_id: $repo_id})
-        WHERE m.class_name IS NOT NULL AND m.class_name <> ''
-        MATCH (c:Class {repo_id: $repo_id, name: m.class_name})
-        MERGE (m)-[:BELONGS_TO]->(c)
-        """,
-        {"repo_id": repo_id},
-    )
+    """
+    为同 class_name 的 Method 和 Class 建 [:BELONGS_TO] 关系。
+    使用 CALL { } IN TRANSACTIONS OF 300 ROWS（Neo4j 4.4+）分批提交，
+    避免大库单事务超时断连。
+    """
+    try:
+        await run_write(
+            """
+            MATCH (m:Method {repo_id: $repo_id})
+            WHERE m.class_name IS NOT NULL AND m.class_name <> ''
+            MATCH (c:Class {repo_id: $repo_id, name: m.class_name})
+            CALL {
+              WITH m, c
+              MERGE (m)-[:BELONGS_TO]->(c)
+            } IN TRANSACTIONS OF 300 ROWS
+            """,
+            {"repo_id": repo_id},
+        )
+    except Exception as e:
+        # 旧版 Neo4j 不支持 IN TRANSACTIONS，降级为逐批手动处理
+        logger.warning("IN TRANSACTIONS not supported, falling back: %s", e)
+        rows = await run_query(
+            "MATCH (c:Class {repo_id: $repo_id}) RETURN c.name AS name",
+            {"repo_id": repo_id},
+        )
+        for r in rows:
+            cname = r.get("name")
+            if not cname:
+                continue
+            await run_write(
+                """
+                MATCH (m:Method {repo_id: $repo_id, class_name: $cname})
+                MATCH (c:Class  {repo_id: $repo_id, name: $cname})
+                MERGE (m)-[:BELONGS_TO]->(c)
+                """,
+                {"repo_id": repo_id, "cname": cname},
+            )
 
 
 # ── SQLite 批量写 ──────────────────────────────────────────────────────────────
@@ -472,11 +499,20 @@ async def _cleanup_old_data(db: aiosqlite.Connection, repo_id: str) -> None:
     await db.execute("DELETE FROM symbols WHERE repo_id=?", (repo_id,))
     await db.execute("DELETE FROM bm25_meta WHERE repo_id=?", (repo_id,))
     await db.commit()
-    # 清理 Neo4j
-    await run_write(
-        "MATCH (n {repo_id: $repo_id}) DETACH DELETE n",
-        {"repo_id": repo_id},
-    )
+    # 分批删除 Neo4j 节点（大库一次全删会超时断连）
+    # 每轮删 500 个，循环直到节点清空
+    while True:
+        rows = await run_query(
+            "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS cnt",
+            {"repo_id": repo_id},
+        )
+        if not rows or rows[0].get("cnt", 0) == 0:
+            break
+        await run_write(
+            "MATCH (n {repo_id: $repo_id}) WITH n LIMIT 500 DETACH DELETE n",
+            {"repo_id": repo_id},
+        )
+        await asyncio.sleep(0)   # 让出事件循环
 
 
 async def _count_edges(repo_id: str) -> int:

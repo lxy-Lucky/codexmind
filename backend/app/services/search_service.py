@@ -364,7 +364,7 @@ async def semantic_search(req: SearchRequest, db: aiosqlite.Connection) -> Searc
     t0 = time.monotonic()
 
     intent = QueryIntent(req.query)
-    fetch_k = req.top_k * 5
+    fetch_k = max(req.top_k * 10, 100)
 
     # ── collection 存在性检查（防止索引未完成时抛 404）─────────────────────────
     col = collection_name(req.repo_id)

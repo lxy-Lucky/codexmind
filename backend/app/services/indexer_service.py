@@ -94,17 +94,17 @@ async def run_index(repo_id: str, root_path: str, db: aiosqlite.Connection) -> N
 
 async def _pass1_parse(
     repo_id: str, root: Path, db: aiosqlite.Connection
-) -> tuple[list[dict], dict[str, str]]:
+) -> tuple[list[dict], dict[str, list[str]]]:
     """
     返回：
       all_chunks  - 所有 chunk（含 symbol_id）
-      symbol_map  - method_name → symbol_id（用于 Pass2 调用解析）
+      symbol_map  - method_name → [symbol_id, ...]（支持同名方法，Pass2 仅用无歧义映射）
     """
     all_chunks: list[dict] = []
     symbol_rows: list[dict] = []
     neo4j_method_nodes: list[dict] = []
     neo4j_class_nodes: list[dict] = []
-    symbol_map: dict[str, str] = {}   # "ClassName.methodName" → symbol_id
+    symbol_map: dict[str, list[str]] = {}   # "ClassName.methodName" → [symbol_id]
 
     for file_path, rel_path, language in _iter_code_files(root):
         try:
@@ -129,11 +129,11 @@ async def _pass1_parse(
             method_name = chunk.get("symbol", "")
             class_name  = chunk.get("class_name", "")
 
-            # symbol_map 注册（支持 ClassName.method 和 method 两种 key）
+            # symbol_map 注册（支持同名方法：list 追加，Pass2 只取无歧义条目）
             if method_name:
-                symbol_map[method_name] = symbol_id
+                symbol_map.setdefault(method_name, []).append(symbol_id)
                 if class_name:
-                    symbol_map[f"{class_name}.{method_name}"] = symbol_id
+                    symbol_map.setdefault(f"{class_name}.{method_name}", []).append(symbol_id)
 
             # SQLite symbol 行
             symbol_rows.append({
@@ -189,10 +189,37 @@ async def _pass1_parse(
 
 # ── Pass 2：调用边 + PageRank ──────────────────────────────────────────────────
 
+def _resolve_callee(
+    symbol_map: dict[str, list[str]],
+    call_ref: str,
+    caller_id: str,
+) -> str | None:
+    """
+    无歧义 callee 解析：
+      - 精确匹配 call_ref（可能是 Class.method 形式）
+      - 若精确匹配有唯一结果 → 返回
+      - 若有多个候选 → 歧义，跳过（避免 log.info/println 等常用名误连边）
+      - 若精确匹配无结果且 call_ref 含 "."，则尝试仅取方法名部分
+      - 方法名部分也必须唯一才返回
+    """
+    candidates = symbol_map.get(call_ref, [])
+    if len(candidates) == 1 and candidates[0] != caller_id:
+        return candidates[0]
+    if len(candidates) > 1:
+        return None   # 歧义，跳过
+    # 降级：只用方法名（去掉 receiver）
+    if "." in call_ref:
+        method_only = call_ref.rsplit(".", 1)[-1]
+        by_name = symbol_map.get(method_only, [])
+        if len(by_name) == 1 and by_name[0] != caller_id:
+            return by_name[0]
+    return None
+
+
 async def _pass2_call_graph(
     repo_id: str,
     all_chunks: list[dict],
-    symbol_map: dict[str, str],
+    symbol_map: dict[str, list[str]],
     db: aiosqlite.Connection,
 ) -> None:
     edges: list[dict] = []
@@ -202,9 +229,8 @@ async def _pass2_call_graph(
         if not caller_id:
             continue
         for call_ref in chunk.get("calls", []):
-            # 尝试精确匹配 ClassName.method，再尝试 method
-            callee_id = symbol_map.get(call_ref) or symbol_map.get(call_ref.split(".")[-1])
-            if callee_id and callee_id != caller_id:
+            callee_id = _resolve_callee(symbol_map, call_ref, caller_id)
+            if callee_id:
                 edges.append({
                     "caller_id":  caller_id,
                     "callee_id":  callee_id,

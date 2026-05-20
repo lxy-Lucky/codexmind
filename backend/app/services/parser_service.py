@@ -446,6 +446,20 @@ def _chunk_has_body(text: str, language: str) -> bool:
 
 # ── maybe_split ───────────────────────────────────────────────────────────────
 
+def _meta_header_from_structured(structured: str) -> str:
+    """
+    从结构化文本中提取元数据头（空行之前的 [FILE]/[CLASS]/[METHOD] 等行）。
+    用于超长方法分窗时，确保每个分窗都携带语义标识，不再是"裸代码"。
+    """
+    lines = structured.split("\n")
+    header: list[str] = []
+    for line in lines:
+        if not line.strip():
+            break
+        header.append(line)
+    return "\n".join(header)
+
+
 def _maybe_split(
     structured: str, raw_code: str,
     line_start: int, line_end: int,
@@ -465,10 +479,21 @@ def _maybe_split(
             "signature":  signature,
             "calls":      calls,
         }]
-    # 超长：sliding window，结构化元数据只在第一块保留
-    return _sliding_window_chunks(raw_code, "", chunk_type, base_line=line_start,
-                                  symbol=symbol, class_name=class_name,
-                                  signature=signature, calls=calls)
+
+    # 超长方法：提取元数据头，每个分窗都携带，避免大方法的 chunk 成为裸代码
+    meta_header = _meta_header_from_structured(structured)
+    header_tokens = _count_tokens(meta_header)
+    # 代码窗口大小 = 总限制 - 头部占用 - 2（空行分隔符）
+    code_window_tokens = max(settings.CHUNK_MAX_TOKENS - header_tokens - 2, 100)
+
+    windows = _sliding_window_chunks(
+        raw_code, "", chunk_type, base_line=line_start,
+        symbol=symbol, class_name=class_name, signature=signature, calls=calls,
+        max_tokens=code_window_tokens,
+    )
+    for w in windows:
+        w["text"] = meta_header + "\n\n" + w["text"]
+    return windows
 
 
 # ── Sliding Window ─────────────────────────────────────────────────────────────
@@ -481,12 +506,13 @@ def _sliding_window_chunks(
     class_name: str = "",
     signature: str = "",
     calls: list[str] | None = None,
+    max_tokens: int | None = None,   # 由 _maybe_split 传入调整后的窗口大小
 ) -> list[dict]:
     lines = source.splitlines()
-    max_tokens = settings.CHUNK_MAX_TOKENS
-    overlap    = settings.CHUNK_OVERLAP_TOKENS
-    chunks     = []
-    start_idx  = 0
+    _max   = max_tokens if max_tokens is not None else settings.CHUNK_MAX_TOKENS
+    overlap = settings.CHUNK_OVERLAP_TOKENS
+    chunks  = []
+    start_idx = 0
 
     while start_idx < len(lines):
         current_lines: list[str] = []
@@ -495,7 +521,7 @@ def _sliding_window_chunks(
 
         while end_idx < len(lines):
             lt = _count_tokens(lines[end_idx])
-            if current_tokens + lt > max_tokens and current_lines:
+            if current_tokens + lt > _max and current_lines:
                 break
             current_lines.append(lines[end_idx])
             current_tokens += lt

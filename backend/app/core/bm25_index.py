@@ -27,16 +27,26 @@ _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 def _tokenize(text: str) -> list[str]:
     """
     标识符感知 tokenization：
-      1. 驼峰拆分  processPayment → process payment
-      2. 下划线拆分 get_order_id  → get order id
-      3. 小写 + 去停用词（长度 < 2 的 token）
+      1. 保留原始标识符（processPayment → processpayment，用于精确查询）
+      2. 驼峰拆分  processPayment → process payment
+      3. 下划线拆分 get_order_id  → get order id
+      4. 小写 + 去停用词（长度 < 2 的 token）
     """
+    # 先提取原始标识符，保持整词（用于精确匹配）
+    raw_idents = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]+', text)
     # 驼峰拆分
-    text = _CAMEL_RE.sub(" ", text)
+    split_text = _CAMEL_RE.sub(" ", text)
     # 非字母数字 → 空格
-    text = re.sub(r"[^a-zA-Z0-9]", " ", text)
-    tokens = [t.lower() for t in text.split() if len(t) >= 2]
-    return tokens
+    split_text = re.sub(r"[^a-zA-Z0-9]", " ", split_text)
+    split_tokens = [t.lower() for t in split_text.split() if len(t) >= 2]
+    # 合并：原始标识符优先（精确匹配权重高），再追加拆分词
+    seen: set[str] = set()
+    result: list[str] = []
+    for t in [i.lower() for i in raw_idents] + split_tokens:
+        if t not in seen and len(t) >= 2:
+            seen.add(t)
+            result.append(t)
+    return result
 
 
 # ── BM25Index 类 ──────────────────────────────────────────────────────────────

@@ -499,20 +499,21 @@ async def _cleanup_old_data(db: aiosqlite.Connection, repo_id: str) -> None:
     await db.execute("DELETE FROM symbols WHERE repo_id=?", (repo_id,))
     await db.execute("DELETE FROM bm25_meta WHERE repo_id=?", (repo_id,))
     await db.commit()
-    # 分批删除 Neo4j 节点（大库一次全删会超时断连）
-    # 每轮删 500 个，循环直到节点清空
-    while True:
-        rows = await run_query(
-            "MATCH (n {repo_id: $repo_id}) RETURN count(n) AS cnt",
-            {"repo_id": repo_id},
-        )
-        if not rows or rows[0].get("cnt", 0) == 0:
-            break
-        await run_write(
-            "MATCH (n {repo_id: $repo_id}) WITH n LIMIT 500 DETACH DELETE n",
-            {"repo_id": repo_id},
-        )
-        await asyncio.sleep(0)   # 让出事件循环
+    # 分批删除 Neo4j 节点。
+    # 必须带 Label（:Method / :Class），不带 Label 会全图扫描 → MemoryPoolOutOfMemory
+    for label in ("Method", "Class", "File"):
+        while True:
+            rows = await run_query(
+                f"MATCH (n:{label} {{repo_id: $repo_id}}) RETURN count(n) AS cnt",
+                {"repo_id": repo_id},
+            )
+            if not rows or rows[0].get("cnt", 0) == 0:
+                break
+            await run_write(
+                f"MATCH (n:{label} {{repo_id: $repo_id}}) WITH n LIMIT 200 DETACH DELETE n",
+                {"repo_id": repo_id},
+            )
+            await asyncio.sleep(0)   # 让出事件循环
 
 
 async def _count_edges(repo_id: str) -> int:

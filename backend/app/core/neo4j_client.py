@@ -10,8 +10,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# 每个写事务最多处理的行数，避免单事务过大导致连接超时
-NEO4J_WRITE_CHUNK = 300
+# 每个写事务最多处理的行数，避免单事务过大耗尽 Neo4j 堆内存
+NEO4J_WRITE_CHUNK = 100
 
 
 @lru_cache(maxsize=1)

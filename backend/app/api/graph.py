@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/graph", tags=["graph"])
 async def method_graph(
     repo_id: str,
     symbol_id: str,
-    depth: int = Query(default=2, ge=1, le=4),
+    depth: int = Query(default=2, ge=1, le=5),
 ):
     """方法级调用图（双向，N 跳）"""
     try:

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useAnalysisStore } from '@/stores/analysisStore'
+import { useRepoStore }     from '@/stores/repoStore'
 import TabSummary from './tabs/TabSummary.vue'
 import TabBug     from './tabs/TabBug.vue'
 import TabDeps    from './tabs/TabDeps.vue'
@@ -7,6 +8,7 @@ import TabHistory from './tabs/TabHistory.vue'
 import TabChat    from './tabs/TabChat.vue'
 
 const analysis = useAnalysisStore()
+const repo     = useRepoStore()
 
 type Tab = { id: typeof analysis.activeTab; label: string; icon: string }
 const tabs: Tab[] = [
@@ -67,7 +69,12 @@ const tabs: Tab[] = [
     <div class="flex-1 overflow-hidden min-h-0 flex flex-col">
       <TabSummary v-if="analysis.activeTab === 'summary'" />
       <TabBug     v-else-if="analysis.activeTab === 'bug'" />
-      <TabDeps    v-else-if="analysis.activeTab === 'deps'" />
+      <TabDeps
+        v-else-if="analysis.activeTab === 'deps'"
+        :repoId="repo.currentRepo?.id ?? ''"
+        :symbolId="analysis.currentSymbolId"
+        :className="analysis.currentClassName || undefined"
+      />
       <TabHistory v-else-if="analysis.activeTab === 'history'" />
       <TabChat    v-else-if="analysis.activeTab === 'chat'" />
     </div>

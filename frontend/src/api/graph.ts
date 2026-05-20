@@ -1,4 +1,4 @@
-import { client } from './client'
+import { http } from './client'
 
 export interface GraphNode {
   id: string
@@ -46,26 +46,26 @@ export interface PathResponse {
 export const graphApi = {
   /** 方法级调用图（双向 N 跳） */
   getMethodGraph(repoId: string, symbolId: string, depth = 2): Promise<GraphResponse> {
-    return client.get(`/api/graph/${repoId}/method/${symbolId}`, { params: { depth } })
+    return http.get(`/api/graph/${repoId}/method/${symbolId}`, { params: { depth } })
       .then(r => r.data)
   },
 
   /** 影响域：修改此方法后谁会受影响 */
   getImpact(repoId: string, symbolId: string, maxDepth = 3): Promise<ImpactResponse> {
-    return client.get(`/api/graph/${repoId}/impact/${symbolId}`, { params: { max_depth: maxDepth } })
+    return http.get(`/api/graph/${repoId}/impact/${symbolId}`, { params: { max_depth: maxDepth } })
       .then(r => r.data)
   },
 
   /** 类级依赖图 */
   getClassGraph(repoId: string, className?: string): Promise<GraphResponse> {
-    return client.get(`/api/graph/${repoId}/class`, {
+    return http.get(`/api/graph/${repoId}/class`, {
       params: className ? { class_name: className } : {}
     }).then(r => r.data)
   },
 
   /** 两方法间最短调用路径 */
   getCallPath(repoId: string, fromId: string, toId: string): Promise<PathResponse> {
-    return client.get(`/api/graph/${repoId}/path`, { params: { from_id: fromId, to_id: toId } })
+    return http.get(`/api/graph/${repoId}/path`, { params: { from_id: fromId, to_id: toId } })
       .then(r => r.data)
   },
 }

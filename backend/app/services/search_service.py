@@ -41,6 +41,20 @@ RRF_K = 60   # RRF 平滑常数
 # ── Layer 1：查询理解 ──────────────────────────────────────────────────────────
 
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+_IDENT_RE  = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]{2,}")
+
+
+def _extract_identifiers(raw: str) -> list[str]:
+    """从查询文本中提取代码标识符（驼峰/下划线风格的词）"""
+    return _IDENT_RE.findall(raw)
+
+
+def _split_identifier(ident: str) -> list[str]:
+    """将驼峰或下划线标识符拆分为小写词元"""
+    text = _CAMEL_RE.sub(" ", ident)
+    text = re.sub(r"[_]", " ", text)
+    return [t.lower() for t in text.split() if len(t) >= 2]
+
 
 # ── 中文查询检测 ──────────────────────────────────────────────────────────────
 

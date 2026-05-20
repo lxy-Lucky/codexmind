@@ -7,8 +7,10 @@ import type { AnalysisMode, BugItem, ChatMessage, SSEChunk } from '@/types'
 
 export const useAnalysisStore = defineStore('analysis', () => {
   // ── State ──────────────────────────────────────────────────────────────────
-  const activeTab     = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat'>('summary')
-  const streaming     = ref(false)
+  const activeTab      = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat'>('summary')
+  const currentSymbolId  = ref('')
+  const currentClassName = ref('')
+  const streaming      = ref(false)
   const streamingText = ref('')
   const bugItems      = ref<BugItem[]>([])
   const confidence    = ref(0)
@@ -25,6 +27,11 @@ export const useAnalysisStore = defineStore('analysis', () => {
   // ── Actions ────────────────────────────────────────────────────────────────
   function setTab(tab: typeof activeTab.value) {
     activeTab.value = tab
+  }
+
+  function setGraphSymbol(symbolId: string, className?: string) {
+    currentSymbolId.value  = symbolId
+    currentClassName.value = className ?? ''
   }
 
   function abort() {
@@ -158,9 +165,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   return {
-    activeTab, streaming, streamingText, bugItems,
+    activeTab, currentSymbolId, currentClassName,
+    streaming, streamingText, bugItems,
     confidence, latencyMs, error, hasResult,
     chatHistory, chatStreaming,
-    setTab, analyze, abort, sendChat, clearChat,
+    setTab, setGraphSymbol, analyze, abort, sendChat, clearChat,
   }
 })

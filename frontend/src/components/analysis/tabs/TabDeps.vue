@@ -3,7 +3,11 @@
     <!-- 工具栏 -->
     <div class="deps-toolbar">
       <div class="view-select-wrap">
-        <select class="view-select" v-model="activeView" @change="loadGraph">
+        <select
+          class="view-select"
+          :value="activeView"
+          @change="switchView(($event.target as HTMLSelectElement).value as ViewKey)"
+        >
           <option v-for="v in views" :key="v.key" :value="v.key">{{ v.label }}</option>
         </select>
         <span class="view-select-arrow">▾</span>

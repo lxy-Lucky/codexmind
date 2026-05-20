@@ -15,9 +15,9 @@ async def get_db() -> aiosqlite.Connection:
     """FastAPI Depends 使用的连接工厂（每次请求独立连接）"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        # 等待锁最多 15s，避免并发请求立即报 locked
-        await db.execute("PRAGMA busy_timeout = 15000")
-        await db.execute("PRAGMA journal_mode = WAL")
+        # WAL 模式已在 init_db 中持久化设置，此处只设超时
+        # 等待写锁最多 30s，与 indexer 保持一致，避免并发索引时 locked
+        await db.execute("PRAGMA busy_timeout = 30000")
         yield db
 
 

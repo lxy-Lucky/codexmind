@@ -22,14 +22,15 @@ const LANG_COLOR: Record<string, string> = {
   javascript: '#f1e05a', go: '#00add8', kotlin: '#a97bff',
 }
 
-async function openFile(file_path: string, line_start: number, line_end: number) {
+async function openFile(file_path: string, line_start: number, line_end: number, symbol_id?: string, class_name?: string) {
   emit('open-file', file_path, line_start, line_end)
+  if (symbol_id) analysis.setGraphSymbol(symbol_id, class_name)
   await new Promise(r => setTimeout(r, 30))
   await editor.openFile(file_path, line_start, line_end)
 }
 
-async function openAndAnalyze(file_path: string, line_start: number, line_end: number) {
-  await openFile(file_path, line_start, line_end)
+async function openAndAnalyze(file_path: string, line_start: number, line_end: number, symbol_id?: string, class_name?: string) {
+  await openFile(file_path, line_start, line_end, symbol_id, class_name)
   analysis.analyze('summary')
 }
 
@@ -89,7 +90,7 @@ function lineCount(snippet: string) {
       <!-- ① 顶部行：语言徽章 + 文件路径 + 相似度 -->
       <div
         class="flex items-center gap-1.5 cursor-pointer"
-        @click="openFile(item.file_path, item.line_start, item.line_end)"
+        @click="openFile(item.file_path, item.line_start, item.line_end, item.symbol_id, item.class_name)"
       >
         <span
           class="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
@@ -154,13 +155,13 @@ function lineCount(snippet: string) {
       <div class="hidden group-hover:flex items-center gap-2 mt-2">
         <button
           class="action-btn border-cyan/30 text-cyan hover:bg-cyan-dim"
-          @click.stop="openFile(item.file_path, item.line_start, item.line_end)"
+          @click.stop="openFile(item.file_path, item.line_start, item.line_end, item.symbol_id, item.class_name)"
         >
           <span>◫</span> 打开文件
         </button>
         <button
           class="action-btn border-purple/30 text-purple hover:bg-purple/10"
-          @click.stop="openAndAnalyze(item.file_path, item.line_start, item.line_end)"
+          @click.stop="openAndAnalyze(item.file_path, item.line_start, item.line_end, item.symbol_id, item.class_name)"
         >
           <span>◆</span> AI 分析
         </button>

@@ -50,14 +50,14 @@ async def get_method_graph(
         CALL {
           WITH center
           MATCH path = (center)-[:CALLS*0..$depth]->(callee:Method {repo_id: $repo_id})
-          RETURN nodes(path) AS ns, relationships(path) AS rs
+          RETURN nodes(path) AS ns
           UNION
           WITH center
           MATCH path = (caller:Method {repo_id: $repo_id})-[:CALLS*1..$depth]->(center)
-          RETURN nodes(path) AS ns, relationships(path) AS rs
+          RETURN nodes(path) AS ns
         }
         UNWIND ns AS n
-        WITH DISTINCT n, rs
+        WITH DISTINCT n
         RETURN
           n.id          AS id,
           n.name        AS name,

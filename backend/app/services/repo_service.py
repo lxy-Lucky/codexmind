@@ -176,6 +176,17 @@ def detect_primary_language(root: Path) -> Optional[str]:
 
 # ── 文件内容读取 ──────────────────────────────────────────────────────────────
 
+def detect_encoding(raw: bytes) -> str:
+    """按优先级尝试常见编码，返回第一个能无损解码的编码名。"""
+    for encoding in ("utf-8", "cp932", "gb2312", "cp1252", "latin-1"):
+        try:
+            raw.decode(encoding)
+            return encoding
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return "latin-1"
+
+
 async def read_file_content(root: Path, rel_path: str) -> FileContentResponse:
     """读取单个文件内容，验证路径安全性"""
     full_path = (root / rel_path).resolve()
@@ -194,8 +205,10 @@ async def read_file_content(root: Path, rel_path: str) -> FileContentResponse:
     if size > 2 * 1024 * 1024:  # 2MB 上限
         raise ValueError(f"文件过大 ({size} bytes)，拒绝读取: {rel_path}")
 
-    async with aiofiles.open(full_path, encoding="utf-8", errors="replace") as f:
-        content = await f.read()
+    async with aiofiles.open(full_path, "rb") as f:
+        raw = await f.read()
+    encoding = detect_encoding(raw)
+    content = raw.decode(encoding, errors="replace")
 
     lang = get_language(full_path) or "plaintext"
     line_count = content.count("\n") + 1

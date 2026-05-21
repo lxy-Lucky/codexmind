@@ -25,7 +25,7 @@ from app.core.embedder import embed
 from app.core.qdrant_client import get_qdrant, ensure_collection, collection_name
 from app.core.neo4j_client import run_write, run_write_batch, run_query
 from app.core.bm25_index import BM25Index, save_bm25, invalidate_bm25
-from app.services.repo_service import SKIP_DIRS, SKIP_SUFFIXES, get_language
+from app.services.repo_service import SKIP_DIRS, SKIP_SUFFIXES, get_language, detect_encoding
 from app.services.parser_service import parse_chunks
 
 logger = logging.getLogger(__name__)
@@ -108,8 +108,9 @@ async def _pass1_parse(
 
     for file_path, rel_path, language in _iter_code_files(root):
         try:
-            async with aiofiles.open(file_path, encoding="utf-8", errors="replace") as f:
-                source = await f.read()
+            async with aiofiles.open(file_path, "rb") as f:
+                raw = await f.read()
+            source = raw.decode(detect_encoding(raw), errors="replace")
         except Exception as e:
             await _log(db, repo_id, "WARNING", f"读取失败 {rel_path}: {e}")
             continue

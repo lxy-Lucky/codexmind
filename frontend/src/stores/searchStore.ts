@@ -30,7 +30,7 @@ export const useSearchStore = defineStore('search', () => {
         query:   query.value,
         repo_id: repoStore.currentRepo.id,
         mode:    mode.value === 'semantic' ? 'semantic' : mode.value,
-        top_k:   10,
+        top_k:   20,
       })
       results.value  = res.results
       latencyMs.value = res.latency_ms

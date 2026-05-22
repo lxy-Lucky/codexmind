@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -69,10 +70,39 @@ SKIP_DIRS: set[str] = {
     "webjars",
 }
 
-# 永远跳过的文件名（精确匹配文件名）
+# 永远跳过的文件名（精确匹配，全部小写；检索时用 fname.lower() 比较）
 SKIP_FILES: set[str] = {
-    ".DS_Store", "Thumbs.db", ".gitignore", ".gitattributes",
+    ".ds_store", "thumbs.db", ".gitignore", ".gitattributes",
+    # ── XML：构建 / 日志 / Servlet 配置（MyBatis Mapper 由 indexer 白名单保留）──
+    "pom.xml", "web.xml",
+    "logback.xml", "logback-spring.xml",
+    "log4j.xml", "log4j2.xml", "log4j2-spring.xml",
+    # ── 已知第三方 JS 库（未压缩原版）──────────────────────────────────────────
+    "jquery.js", "jquery.slim.js",
+    "bootstrap.js", "bootstrap.bundle.js",
+    "moment.js", "moment-with-locales.js",
+    "lodash.js", "underscore.js",
+    "axios.js",
+    "angular.js",
+    "react.js", "react-dom.js",
+    "react.development.js", "react-dom.development.js",
+    "react.production.min.js", "react-dom.production.min.js",
+    "vue.js", "vue.global.js", "vue.esm-browser.js",
+    "d3.js", "echarts.js", "highcharts.js",
+    "popper.js", "tippy.js",
+    "select2.js", "datatables.js",
+    "swiper.js", "slick.js",
+    "require.js", "requirejs.js",
 }
+
+# 版本号标记的第三方库文件名正则（如 jquery-3.6.0.js / bootstrap.5.3.2.js）
+VENDOR_VERSION_RE = re.compile(
+    r'^(?:jquery|bootstrap|angular|moment|lodash|underscore|axios|'
+    r'react(?:-dom)?|vue|d3|echarts|highcharts|select2|datatables|'
+    r'swiper|popper|tippy|require|knockout|backbone|font.?awesome)'
+    r'[.\-]\d',
+    re.IGNORECASE,
+)
 
 # 跳过的文件名后缀（含这些后缀的视为压缩/打包库文件，不参与索引）
 SKIP_SUFFIXES: tuple[str, ...] = (
@@ -114,7 +144,7 @@ def scan_file_tree(
         return []
 
     for entry in entries:
-        if entry.name in SKIP_FILES:
+        if entry.name.lower() in SKIP_FILES:
             continue
         if entry.is_dir() and entry.name in SKIP_DIRS:
             continue

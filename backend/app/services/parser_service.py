@@ -269,6 +269,11 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
             line_end   = node.end_point[0]   + 1
             raw_code   = "\n".join(lines[line_start - 1: line_end])
             symbol     = _extract_symbol(node, source_bytes)
+
+            # 跳过无业务价值的简单 getter / setter
+            if _is_trivial_accessor(symbol, raw_code):
+                return
+
             signature  = _extract_signature(node, source_bytes, language)
             annotations = _extract_annotations(raw_code)
             comment    = _extract_leading_comment(raw_code)
@@ -379,6 +384,8 @@ def _regex_parse_chunks(source: str, language: str, file_path: str) -> list[dict
         raw_code = "\n".join(lines[start_idx: end_idx + 1])
         if not _chunk_has_body(raw_code, language):
             continue
+        if _is_trivial_accessor(symbol, raw_code):
+            continue
 
         annotations = _extract_annotations(raw_code)
         comment     = _extract_leading_comment(raw_code)
@@ -441,6 +448,32 @@ def _chunk_has_body(text: str, language: str) -> bool:
                    and not l.startswith("/*") and not l.startswith("@")
                    and l not in ("{", "}", "")]
     return len(non_trivial) >= 2
+
+
+# ── Getter / Setter 过滤 ───────────────────────────────────────────────────────
+
+_ACCESSOR_PREFIX_RE = re.compile(r'^(?:get|set|is|has)[A-Z]')
+
+
+def _is_trivial_accessor(symbol: str, raw_code: str) -> bool:
+    """
+    判断是否为无业务价值的简单 getter / setter / is / has 方法，跳过以降低索引噪音。
+
+    判定条件（同时满足）：
+      1. 方法名以 get / set / is / has + 大写字母 开头
+      2. 有效代码行（去掉空行、纯括号行、注释行、注解行）≤ 3 行
+         典型 getter：签名行 + return 语句 = 2 行
+         带单行校验的 setter：签名行 + 赋值 = 2–3 行
+    """
+    if not symbol or not _ACCESSOR_PREFIX_RE.match(symbol):
+        return False
+    effective = [
+        l for l in raw_code.splitlines()
+        if l.strip()
+        and l.strip() not in ("{", "}")
+        and not l.strip().startswith(("/", "*", "@"))
+    ]
+    return len(effective) <= 3
 
 
 # ── maybe_split ───────────────────────────────────────────────────────────────

@@ -229,17 +229,24 @@ def parse_chunks(source: str, language: str, file_path: str) -> list[dict]:
         try:
             tree = parser.parse(source.encode("utf-8"))
             chunks = _extract_from_tree(tree, source, language, file_path)
-            if chunks:
-                return chunks
+            # tree-sitter 成功解析：
+            #   有 chunks  → 直接返回
+            #   空 chunks  → 文件全是 getter/setter 或无方法，不值得索引
+            #               不再往下走正则/sliding window，避免产生 block 碎片
+            return chunks
         except Exception as e:
             logger.warning("tree-sitter parse error [%s] %s: %s", language, file_path, e)
+            # tree-sitter 报错（语法不兼容等），才继续往下兜底
 
-    # fallback: 正则
+    # 无 tree-sitter 支持的语言，或 tree-sitter 抛异常时的兜底
     regex_chunks = _regex_parse_chunks(source, language, file_path)
     if regex_chunks:
         return regex_chunks
 
-    # 最终兜底: sliding window（无结构化元数据）
+    # sliding window 仅用于无 parser 的语言（xml/yaml/sql 等）
+    # tree-sitter 支持的语言（java/js/ts）到这里说明解析失败，返回空跳过
+    if parser is not None:
+        return []
     return _sliding_window_chunks(source, file_path)
 
 
@@ -310,7 +317,9 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
 
     walk(tree.root_node)
     if not chunks:
-        return _sliding_window_chunks(source, file_path)
+        # tree-sitter 成功解析但无有效方法（全是 getter/setter 或纯常量类）
+        # 返回空列表，由 parse_chunks 决定是否兜底，不在此处产生 block 碎片
+        return []
     return chunks
 
 

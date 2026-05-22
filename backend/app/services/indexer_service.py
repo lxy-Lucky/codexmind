@@ -22,7 +22,7 @@ from qdrant_client.http.models import PointStruct
 
 from app.core.config import settings
 from app.core.embedder import embed
-from app.core.qdrant_client import get_qdrant, ensure_collection, collection_name
+from app.core.qdrant_client import get_qdrant, ensure_collection, delete_collection, collection_name
 from app.core.neo4j_client import run_write, run_write_batch, run_query, run_autocommit
 from app.core.bm25_index import BM25Index, save_bm25, invalidate_bm25
 from app.services.repo_service import (
@@ -51,11 +51,11 @@ async def run_index(
     await db.execute("PRAGMA synchronous = NORMAL")
 
     await _update_status(db, repo_id, 1, "开始扫描文件...")
-    await ensure_collection(repo_id)
 
-    # 清理旧数据
+    # 清理旧数据（先清后建，确保 Qdrant 无残留）
     await _cleanup_old_data(db, repo_id)
     invalidate_bm25(repo_id)
+    await ensure_collection(repo_id)
 
     try:
         # ── Pass 1：解析 + 建 symbol 表 + Neo4j 节点 ──────────────────────
@@ -528,6 +528,12 @@ async def _cleanup_old_data(db: aiosqlite.Connection, repo_id: str) -> None:
     await db.execute("DELETE FROM symbols WHERE repo_id=?", (repo_id,))
     await db.execute("DELETE FROM bm25_meta WHERE repo_id=?", (repo_id,))
     await db.commit()
+    # 删除 Qdrant collection（含所有旧向量点）；首次索引时 collection 可能不存在，忽略异常
+    try:
+        await delete_collection(repo_id)
+        logger.info("[%s] Qdrant collection dropped", repo_id)
+    except Exception:
+        pass
     # 分批删除 Neo4j 节点。
     # 必须带 Label（:Method / :Class），不带 Label 会全图扫描 → MemoryPoolOutOfMemory
     for label in ("Method", "Class", "File"):

@@ -314,6 +314,10 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
             raw_code       = "\n".join(lines[comment_line_0: line_end])
             symbol         = _extract_symbol(node, source_bytes)
 
+            # 内容质量检查：过滤空方法体 / 孤立括号碎片（如匿名类残留的 }）
+            if not _chunk_has_body(raw_code, language):
+                return
+
             # 跳过无业务价值的简单 getter / setter
             if _is_trivial_accessor(symbol, raw_code):
                 return
@@ -610,6 +614,19 @@ def _sliding_window_chunks(
             end_idx = start_idx + 1
 
         text = "\n".join(current_lines)
+
+        # 跳过只含括号 / 注释的无意义尾窗（超长方法分窗后末尾常见 }、} } 碎片）
+        _meaningful = [
+            l for l in current_lines
+            if l.strip()
+            and l.strip() not in ("{", "}", "*/", "*")
+            and not l.strip().startswith(("/**", "/*", "* ", "//", "@"))
+        ]
+        if not _meaningful:
+            overlap_lines = max(1, overlap // 10)
+            start_idx = max(end_idx - overlap_lines, start_idx + 1)
+            continue
+
         chunks.append({
             "text":       text,
             "raw_code":   text[:800],

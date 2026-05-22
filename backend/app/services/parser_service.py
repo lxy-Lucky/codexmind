@@ -25,17 +25,21 @@ import re
 from functools import lru_cache
 from typing import Any, Optional
 
-import tiktoken
-
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_enc = tiktoken.get_encoding("cl100k_base")
+
+@lru_cache(maxsize=1)
+def _get_tokenizer():
+    # 与 EMBEDDING_MODEL 共用同一个 tokenizer，确保切窗判定与向量化截断口径一致。
+    # bge-m3 基于 XLM-RoBERTa，CJK 通常 1 字 ≈ 1 token，cl100k_base 会高估 2-3 倍。
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL)
 
 
 def _count_tokens(text: str) -> int:
-    return len(_enc.encode(text, disallowed_special=()))
+    return len(_get_tokenizer().encode(text, add_special_tokens=False))
 
 
 # ── tree-sitter ────────────────────────────────────────────────────────────────

@@ -43,7 +43,10 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "aiofiles>=23.2.1",
     "python-dotenv>=1.0.1",
-    "tiktoken>=0.7.0",
+
+    # Tokenizer：与 EMBEDDING_MODEL 共用同一个分词器
+    # （bge-m3 的 XLM-RoBERTa tokenizer 对 CJK 友好，避免切窗误判）
+    "transformers>=4.40.0",
 ]
 
 [project.optional-dependencies]

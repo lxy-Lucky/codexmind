@@ -40,6 +40,7 @@ async def init_db() -> None:
                 symbol_count INTEGER DEFAULT 0,
                 edge_count   INTEGER DEFAULT 0,
                 indexed      INTEGER DEFAULT 0,  -- 0=未索引 1=索引中 2=完成 3=失败
+                skip_dirs    TEXT    DEFAULT '[]', -- JSON 数组，仓库专属跳过目录名
                 created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
             );
@@ -104,4 +105,15 @@ async def init_db() -> None:
                 ON query_history(repo_id, created_at DESC);
         """)
         await db.commit()
+
+        # 旧库迁移：新增列，已存在时静默跳过
+        for migration in [
+            "ALTER TABLE repos ADD COLUMN skip_dirs TEXT DEFAULT '[]'",
+        ]:
+            try:
+                await db.execute(migration)
+                await db.commit()
+            except Exception:
+                pass
+
     logger.info("SQLite initialized at %s", DB_PATH)

@@ -21,7 +21,8 @@ class IndexStatus(IntEnum):
 
 class RepoRegisterRequest(BaseModel):
     name: str
-    root_path: str  # 服务器本地绝对路径
+    root_path: str          # 服务器本地绝对路径
+    skip_dirs: list[str] = []   # 该仓库专属的额外跳过目录名（目录名，非路径）
 
     @field_validator("root_path")
     @classmethod
@@ -44,6 +45,7 @@ class RepoResponse(BaseModel):
     file_count: int
     chunk_count: int
     indexed: IndexStatus
+    skip_dirs: list[str] = []
     created_at: datetime
     updated_at: datetime
 

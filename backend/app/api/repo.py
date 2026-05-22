@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 
@@ -46,20 +47,22 @@ async def register_repo(
     if not settings.is_path_allowed(root):
         raise HTTPException(403, "该路径不在允许的白名单内")
 
-    repo_id  = make_repo_id(body.root_path)
-    language = detect_primary_language(root)
-    files    = count_code_files(root)
+    repo_id   = make_repo_id(body.root_path)
+    language  = detect_primary_language(root)
+    files     = count_code_files(root)
+    skip_json = json.dumps(body.skip_dirs, ensure_ascii=False)
 
-    # upsert（同路径重新注册时更新名称）
+    # upsert（同路径重新注册时更新名称和 skip_dirs）
     await db.execute(
-        """INSERT INTO repos(id, name, root_path, language, file_count, indexed)
-           VALUES (?,?,?,?,?,0)
+        """INSERT INTO repos(id, name, root_path, language, file_count, indexed, skip_dirs)
+           VALUES (?,?,?,?,?,0,?)
            ON CONFLICT(root_path) DO UPDATE SET
                name=excluded.name,
                language=excluded.language,
                file_count=excluded.file_count,
+               skip_dirs=excluded.skip_dirs,
                updated_at=CURRENT_TIMESTAMP""",
-        (repo_id, body.name, body.root_path, language, files),
+        (repo_id, body.name, body.root_path, language, files, skip_json),
     )
     await db.commit()
 
@@ -120,9 +123,11 @@ async def trigger_index(
     if dict(row)["indexed"] == 1:
         raise HTTPException(409, "索引任务已在运行中")
 
+    d = dict(row)
+    extra_skip = frozenset(json.loads(d.get("skip_dirs") or "[]"))
     # 后台异步执行，不阻塞响应
     background_tasks.add_task(
-        _run_index_bg, repo_id, dict(row)["root_path"]
+        _run_index_bg, repo_id, d["root_path"], extra_skip
     )
 
     return IndexProgressResponse(
@@ -159,8 +164,10 @@ async def get_file_tree(
     row = await _fetch_repo(db, repo_id)
     if not row:
         raise HTTPException(404, "仓库不存在")
-    root = Path(dict(row)["root_path"])
-    nodes = scan_file_tree(root)
+    d = dict(row)
+    root = Path(d["root_path"])
+    extra = frozenset(json.loads(d.get("skip_dirs") or "[]"))
+    nodes = scan_file_tree(root, extra_skip_dirs=extra)
     return nodes
 
 
@@ -245,7 +252,6 @@ async def _fetch_repo(db, repo_id: str):
 
 
 def _row_to_response(row) -> RepoResponse:
-    from datetime import datetime
     d = dict(row)
     return RepoResponse(
         id          = d["id"],
@@ -255,6 +261,7 @@ def _row_to_response(row) -> RepoResponse:
         file_count  = d["file_count"],
         chunk_count = d["chunk_count"],
         indexed     = IndexStatus(d["indexed"]),
+        skip_dirs   = json.loads(d.get("skip_dirs") or "[]"),
         created_at  = d["created_at"],
         updated_at  = d["updated_at"],
     )
@@ -269,13 +276,15 @@ def _status_message(status: int) -> str:
     }.get(status, "未知状态")
 
 
-async def _run_index_bg(repo_id: str, root_path: str) -> None:
+async def _run_index_bg(
+    repo_id: str, root_path: str,
+    extra_skip_dirs: frozenset[str] = frozenset(),
+) -> None:
     """后台任务：需要独立的 db 连接（BackgroundTasks 不共享请求上下文）"""
     import aiosqlite as _aiosqlite
     async with _aiosqlite.connect(settings.SQLITE_PATH) as db:
         db.row_factory = _aiosqlite.Row
-        # busy_timeout：等待写锁最多 30s
         await db.execute("PRAGMA busy_timeout = 30000")
         await db.execute("PRAGMA journal_mode = WAL")
         await db.execute("PRAGMA synchronous = NORMAL")
-        await indexer_service.run_index(repo_id, root_path, db)
+        await indexer_service.run_index(repo_id, root_path, db, extra_skip_dirs)

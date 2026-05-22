@@ -49,6 +49,7 @@ EXT_TO_LANG: dict[str, str] = {
 SKIP_DIRS: set[str] = {
     # VCS
     ".git", ".svn", ".hg",
+    "CVS", "cvs",                  # CVS 版本控制元数据
     # Node / 前端包管理
     "node_modules", "bower_components", "jspm_packages",
     # Python
@@ -57,17 +58,22 @@ SKIP_DIRS: set[str] = {
     "target", "build", "dist", ".gradle", ".idea", ".vscode",
     "out", "bin", ".cache", ".mypy_cache", ".pytest_cache",
     "cmake-build-debug", "cmake-build-release",
+    # Java Web 编译产物 / 运行时临时目录
+    "classes",                     # WEB-INF/classes — 编译后 .class 文件
+    "work",                        # Tomcat work 目录（JSP 编译缓存）
     # 第三方库 / vendor（跨语言）
-    "vendor", "vendors",          # PHP Composer / Go / Ruby / 通用
-    "third_party", "thirdparty",  # C++ / 通用
+    "vendor", "vendors",
+    "third_party", "thirdparty",
     "external", "externals",
-    "deps",                        # Elixir mix deps
+    "deps",
     # iOS / macOS
     "Pods", "Carthage",
     # Ruby
     ".bundle",
     # Java web 内嵌资源（Bootstrap / jQuery 等打包进 jar 的静态文件）
     "webjars",
+    # 静态资产目录（图片，扩展名不在支持列表，跳过可减少 IO）
+    "img", "imgs", "images",
 }
 
 # 永远跳过的文件名（精确匹配，全部小写；检索时用 fname.lower() 比较）
@@ -128,6 +134,7 @@ def scan_file_tree(
     rel_base: Optional[Path] = None,
     max_depth: int = 8,
     _depth: int = 0,
+    extra_skip_dirs: frozenset[str] = frozenset(),
 ) -> list[FileNode]:
     """递归扫描目录，返回 FileNode 树"""
     if rel_base is None:
@@ -137,6 +144,7 @@ def scan_file_tree(
         return []
 
     nodes: list[FileNode] = []
+    effective_skip_dirs = SKIP_DIRS | extra_skip_dirs
 
     try:
         entries = sorted(root.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
@@ -146,13 +154,13 @@ def scan_file_tree(
     for entry in entries:
         if entry.name.lower() in SKIP_FILES:
             continue
-        if entry.is_dir() and entry.name in SKIP_DIRS:
+        if entry.is_dir() and entry.name in effective_skip_dirs:
             continue
 
         rel_path = str(entry.relative_to(rel_base))
 
         if entry.is_dir():
-            children = scan_file_tree(entry, rel_base, max_depth, _depth + 1)
+            children = scan_file_tree(entry, rel_base, max_depth, _depth + 1, extra_skip_dirs)
             nodes.append(FileNode(
                 name=entry.name,
                 path=rel_path,

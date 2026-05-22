@@ -38,7 +38,10 @@ BATCH_SIZE = 32
 
 # ── 主入口 ────────────────────────────────────────────────────────────────────
 
-async def run_index(repo_id: str, root_path: str, db: aiosqlite.Connection) -> None:
+async def run_index(
+    repo_id: str, root_path: str, db: aiosqlite.Connection,
+    extra_skip_dirs: frozenset[str] = frozenset(),
+) -> None:
     root = Path(root_path)
 
     # 设置 busy_timeout：等待锁最多 30s，而不是立即报 locked
@@ -57,7 +60,7 @@ async def run_index(repo_id: str, root_path: str, db: aiosqlite.Connection) -> N
     try:
         # ── Pass 1：解析 + 建 symbol 表 + Neo4j 节点 ──────────────────────
         await _update_status(db, repo_id, 1, "Pass 1: 解析符号表...")
-        all_chunks, symbol_map = await _pass1_parse(repo_id, root, db)
+        all_chunks, symbol_map = await _pass1_parse(repo_id, root, db, extra_skip_dirs)
 
         # ── Pass 2：构建 Call Graph ────────────────────────────────────────
         await _update_status(db, repo_id, 1, "Pass 2: 构建调用图...")
@@ -96,7 +99,8 @@ async def run_index(repo_id: str, root_path: str, db: aiosqlite.Connection) -> N
 # ── Pass 1：解析 + 符号表 + Neo4j 节点 ────────────────────────────────────────
 
 async def _pass1_parse(
-    repo_id: str, root: Path, db: aiosqlite.Connection
+    repo_id: str, root: Path, db: aiosqlite.Connection,
+    extra_skip_dirs: frozenset[str] = frozenset(),
 ) -> tuple[list[dict], dict[str, list[str]]]:
     """
     返回：
@@ -109,7 +113,7 @@ async def _pass1_parse(
     neo4j_class_nodes: list[dict] = []
     symbol_map: dict[str, list[str]] = {}   # "ClassName.methodName" → [symbol_id]
 
-    for file_path, rel_path, language in _iter_code_files(root):
+    for file_path, rel_path, language in _iter_code_files(root, extra_skip_dirs):
         try:
             async with aiofiles.open(file_path, "rb") as f:
                 raw = await f.read()
@@ -475,9 +479,13 @@ async def _bulk_insert_symbols(db: aiosqlite.Connection, rows: list[dict]) -> No
 
 # ── 工具函数 ───────────────────────────────────────────────────────────────────
 
-def _iter_code_files(root: Path) -> Iterator[tuple[Path, str, str]]:
+def _iter_code_files(
+    root: Path,
+    extra_skip_dirs: frozenset[str] = frozenset(),
+) -> Iterator[tuple[Path, str, str]]:
+    effective_skip = SKIP_DIRS | extra_skip_dirs
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        dirnames[:] = [d for d in dirnames if d not in effective_skip]
         for fname in filenames:
             fname_lower = fname.lower()
 

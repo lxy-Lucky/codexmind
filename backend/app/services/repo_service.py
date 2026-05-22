@@ -122,6 +122,34 @@ def get_language(path: Path) -> Optional[str]:
     return EXT_TO_LANG.get(path.suffix.lower())
 
 
+def _should_skip_dir(
+    name: str,
+    rel_from_root: str,
+    extra_skip_dirs: frozenset[str],
+) -> bool:
+    """
+    判断目录是否命中用户自定义跳过规则。
+
+    extra_skip_dirs 两种写法：
+      - 纯目录名（不含 / 和 \）→ 匹配任意层级同名目录
+        例：'Property'  →  跳过所有叫 Property 的目录
+      - 相对路径（含 /）      → 只匹配从 repo root 起的特定路径
+        例：'WEB-INF/src/Property'  →  只跳过那一个
+    """
+    rel_norm = rel_from_root.replace("\\", "/")
+    for rule in extra_skip_dirs:
+        rule_norm = rule.replace("\\", "/").strip("/")
+        if "/" in rule_norm:
+            # 路径规则：精确或前缀匹配
+            if rel_norm == rule_norm or rel_norm.startswith(rule_norm + "/"):
+                return True
+        else:
+            # 名称规则：任意层级
+            if name == rule_norm:
+                return True
+    return False
+
+
 def make_repo_id(root_path: str) -> str:
     """根据路径生成稳定的 repo_id（sha1 前 12 位）"""
     return hashlib.sha1(root_path.encode()).hexdigest()[:12]
@@ -144,7 +172,6 @@ def scan_file_tree(
         return []
 
     nodes: list[FileNode] = []
-    effective_skip_dirs = SKIP_DIRS | extra_skip_dirs
 
     try:
         entries = sorted(root.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
@@ -154,10 +181,14 @@ def scan_file_tree(
     for entry in entries:
         if entry.name.lower() in SKIP_FILES:
             continue
-        if entry.is_dir() and entry.name in effective_skip_dirs:
-            continue
 
         rel_path = str(entry.relative_to(rel_base))
+
+        if entry.is_dir() and (
+            entry.name in SKIP_DIRS
+            or _should_skip_dir(entry.name, rel_path, extra_skip_dirs)
+        ):
+            continue
 
         if entry.is_dir():
             children = scan_file_tree(entry, rel_base, max_depth, _depth + 1, extra_skip_dirs)

@@ -34,10 +34,10 @@ export const useRepoStore = defineStore('repo', () => {
     }
   }
 
-  async function registerRepo(name: string, root_path: string) {
+  async function registerRepo(name: string, root_path: string, skip_dirs: string[] = []) {
     loading.value = true
     try {
-      const repo = await repoApi.register(name, root_path)
+      const repo = await repoApi.register(name, root_path, skip_dirs)
       await fetchRepos()
       currentRepo.value = repo
       return repo

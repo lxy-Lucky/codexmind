@@ -4,12 +4,18 @@ import { useRepoStore } from '@/stores/repoStore'
 import type { Repo } from '@/types'
 
 const repo    = useRepoStore()
-const showAdd = ref(false)
-const newName = ref('')
-const newPath = ref('')
-const adding  = ref(false)
-const err     = ref('')
+const showAdd    = ref(false)
+const newName    = ref('')
+const newPath    = ref('')
+const newSkipRaw = ref('')   // 逗号分隔的目录名，如 "View, sheet, Property"
+const adding     = ref(false)
+const err        = ref('')
 const confirmDeleteId = ref<string | null>(null)
+
+function parseSkipDirs(raw: string): string[] {
+  // 支持逗号或换行分隔，方便多条路径管理
+  return raw.split(/[,\n]/).map(s => s.trim()).filter(Boolean)
+}
 
 const STATUS_LABEL: Record<number, string> = {
   0: '未索引', 1: '索引中...', 2: '已就绪', 3: '失败',
@@ -23,9 +29,13 @@ async function addRepo() {
   if (!newName.value.trim() || !newPath.value.trim()) return
   adding.value = true; err.value = ''
   try {
-    await repo.registerRepo(newName.value.trim(), newPath.value.trim())
+    await repo.registerRepo(
+      newName.value.trim(),
+      newPath.value.trim(),
+      parseSkipDirs(newSkipRaw.value),
+    )
     showAdd.value = false
-    newName.value = ''; newPath.value = ''
+    newName.value = ''; newPath.value = ''; newSkipRaw.value = ''
   } catch (e: any) {
     err.value = e.message
   } finally {
@@ -71,6 +81,9 @@ function select(r: Repo) { repo.selectRepo(r) }
         <div class="font-mono text-[10px] flex gap-2">
           <span class="text-text-muted">{{ r.file_count }} 文件</span>
           <span :class="STATUS_COLOR[r.indexed]">{{ STATUS_LABEL[r.indexed] }}</span>
+          <span v-if="r.skip_dirs?.length" class="text-amber/70">
+            跳过 {{ r.skip_dirs.length }} 目录
+          </span>
         </div>
       </div>
 
@@ -135,10 +148,27 @@ function select(r: Repo) { repo.selectRepo(r) }
         <input v-model="newName" placeholder="仓库名称" class="input-sm" />
         <input
           v-model="newPath"
-          placeholder="/home/user/projects/my-project"
+          placeholder="C:\Users\...\my-project"
           class="input-sm font-mono text-[11px]"
-          @keydown.enter="addRepo"
         />
+        <!-- 跳过目录：逗号分隔，选填 -->
+        <div class="flex flex-col gap-1">
+          <textarea
+            v-model="newSkipRaw"
+            placeholder="跳过目录（选填，一行一条或逗号分隔）&#10;例：&#10;View&#10;WEB-INF/src/Property&#10;WEB-INF/sheet"
+            rows="3"
+            class="input-sm font-mono text-[11px] resize-none leading-relaxed"
+          />
+          <!-- 实时预览 tag -->
+          <div v-if="parseSkipDirs(newSkipRaw).length" class="flex flex-wrap gap-1">
+            <span
+              v-for="d in parseSkipDirs(newSkipRaw)"
+              :key="d"
+              class="px-1.5 py-0.5 rounded font-mono text-[10px]
+                     bg-amber/10 border border-amber/30 text-amber"
+            >{{ d }}</span>
+          </div>
+        </div>
         <div v-if="err" class="text-red-accent text-[11px] font-mono leading-snug">{{ err }}</div>
         <div class="flex gap-2">
           <button

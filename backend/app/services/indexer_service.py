@@ -27,7 +27,7 @@ from app.core.neo4j_client import run_write, run_write_batch, run_query, run_aut
 from app.core.bm25_index import BM25Index, save_bm25, invalidate_bm25
 from app.services.repo_service import (
     SKIP_DIRS, SKIP_FILES, SKIP_SUFFIXES, VENDOR_VERSION_RE,
-    get_language, detect_encoding,
+    get_language, detect_encoding, _should_skip_dir,
 )
 from app.services.parser_service import parse_chunks
 
@@ -483,9 +483,13 @@ def _iter_code_files(
     root: Path,
     extra_skip_dirs: frozenset[str] = frozenset(),
 ) -> Iterator[tuple[Path, str, str]]:
-    effective_skip = SKIP_DIRS | extra_skip_dirs
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in effective_skip]
+        cur_rel = Path(dirpath).relative_to(root)
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in SKIP_DIRS
+            and not _should_skip_dir(d, str(cur_rel / d), extra_skip_dirs)
+        ]
         for fname in filenames:
             fname_lower = fname.lower()
 

@@ -5,8 +5,8 @@ import type {
 } from '@/types'
 
 export const repoApi = {
-  register: (name: string, root_path: string) =>
-    http.post<Repo>('/api/repo', { name, root_path }).then(r => r.data),
+  register: (name: string, root_path: string, skip_dirs: string[] = []) =>
+    http.post<Repo>('/api/repo', { name, root_path, skip_dirs }).then(r => r.data),
 
   list: () =>
     http.get<RepoListResponse>('/api/repo').then(r => r.data),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import warnings
 from functools import lru_cache
 from typing import Any
 
@@ -19,6 +20,7 @@ def _load_model() -> Any:
         settings.EMBEDDING_DEVICE,
     )
     # 延迟导入，避免启动时强依赖 GPU
+    warnings.filterwarnings("ignore", message="Can't initialize NVML", category=UserWarning)
     from FlagEmbedding import BGEM3FlagModel  # type: ignore
 
     model = BGEM3FlagModel(

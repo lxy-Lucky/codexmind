@@ -275,13 +275,10 @@ async def _compute_pagerank(repo_id: str) -> None:
     try:
         await run_write(
             """
-            CALL gds.graph.project.cypher(
-              $graph_name,
-              'MATCH (m:Method {repo_id: $repo_id}) RETURN id(m) AS id',
-              'MATCH (a:Method {repo_id: $repo_id})-[:CALLS]->(b:Method {repo_id: $repo_id})
-               RETURN id(a) AS source, id(b) AS target',
-              {parameters: {repo_id: $repo_id}}
-            )
+            MATCH (source:Method {repo_id: $repo_id})
+            OPTIONAL MATCH (source)-[:CALLS]->(target:Method {repo_id: $repo_id})
+            WITH gds.graph.project($graph_name, source, target) AS g
+            RETURN g.graphName AS graphName
             """,
             {"graph_name": graph_name, "repo_id": repo_id},
         )
@@ -302,7 +299,7 @@ async def _compute_pagerank(repo_id: str) -> None:
     finally:
         if projected:
             try:
-                await run_write("CALL gds.graph.drop($graph_name)", {"graph_name": graph_name})
+                await run_write("CALL gds.graph.drop($graph_name) YIELD graphName", {"graph_name": graph_name})
             except Exception:
                 pass
 

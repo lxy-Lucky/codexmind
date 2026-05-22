@@ -172,9 +172,12 @@ class QueryIntent:
 
 async def _dense_search(
     query: str, repo_id: str, top_k: int,
-    language_filter: Optional[str]
-) -> list[tuple[str, float]]:
-    """返回 [(chunk_id, score), ...] Dense 向量搜索"""
+    language_filter: Optional[str],
+) -> tuple[list[tuple[str, float]], dict[str, dict]]:
+    """
+    返回 ([(chunk_id, score), ...], {chunk_id: payload})。
+    payload 随 query_points 一并拿回，避免后续再发一次 retrieve 请求。
+    """
     query_vec = await embed_query(query)
     client = get_qdrant()
     col = collection_name(repo_id)
@@ -193,10 +196,12 @@ async def _dense_search(
             query_filter=qfilter,
             with_payload=True,
         )
-        return [(str(h.id), round(h.score, 4)) for h in res.points]
+        scores   = [(str(h.id), round(h.score, 4)) for h in res.points]
+        payloads = {str(h.id): (h.payload or {}) for h in res.points}
+        return scores, payloads
     except Exception as e:
         logger.error("Dense search failed for collection %s: %s", col, e)
-        return []
+        return [], {}
 
 
 def _sparse_search(
@@ -385,7 +390,7 @@ async def semantic_search(req: SearchRequest, db: aiosqlite.Connection) -> Searc
     if _needs_llm_expansion(req.query):
         llm_task = asyncio.create_task(_expand_query_with_llm(req.query))
 
-    dense_results = await _dense_search(
+    dense_results, dense_payloads = await _dense_search(
         intent.embed_query_text(), req.repo_id, fetch_k, req.language_filter
     )
 
@@ -403,11 +408,14 @@ async def semantic_search(req: SearchRequest, db: aiosqlite.Connection) -> Searc
     sparse_results = await loop.run_in_executor(
         None, _sparse_search, intent.build_bm25_query(), req.repo_id, fetch_k
     )
-    candidates     = _rrf_merge(dense_results, sparse_results)
+    candidates = _rrf_merge(dense_results, sparse_results)
 
-    # 拉取所有候选的 payload（从 Qdrant）
+    # dense_payloads 已覆盖向量检索命中的所有候选；
+    # 只对 BM25-only 候选（未被 dense 覆盖）补一次 retrieve
     candidate_ids = [c[0] for c in candidates]
-    payloads = await _fetch_payloads(req.repo_id, candidate_ids)
+    missing_ids   = [cid for cid in candidate_ids if cid not in dense_payloads]
+    extra_payloads = await _fetch_payloads(req.repo_id, missing_ids) if missing_ids else {}
+    payloads = {**dense_payloads, **extra_payloads}
 
     # Layer 3：Call Graph 增强
     graph_scores = await _graph_enhance(candidates, req.repo_id, intent)

@@ -8,6 +8,10 @@ from qdrant_client.http.models import (
     Distance,
     VectorParams,
     PayloadSchemaType,
+    HnswConfigDiff,
+    ScalarQuantization,
+    ScalarQuantizationConfig,
+    ScalarType,
 )
 
 from app.core.config import settings
@@ -49,6 +53,22 @@ async def ensure_collection(repo_id: str) -> None:
         vectors_config=VectorParams(
             size=settings.vector_size,
             distance=Distance.COSINE,
+            on_disk=False,          # 向量常驻内存，不走磁盘 mmap
+        ),
+        # HNSW：ef_construct 128 → 索引质量更好，搜索时 recall 更高
+        hnsw_config=HnswConfigDiff(
+            m=16,
+            ef_construct=128,
+            on_disk=False,
+        ),
+        # 标量量化 INT8：内存降至 1/4，搜索速度提升 2–4×，精度损失 < 1%
+        # rescore=True（默认）：用原始向量对 top 候选重排，保证最终精度
+        quantization_config=ScalarQuantization(
+            scalar=ScalarQuantizationConfig(
+                type=ScalarType.INT8,
+                quantile=0.99,      # 裁剪 1% 极端值，减少量化误差
+                always_ram=True,    # 量化向量也常驻内存
+            ),
         ),
     )
 

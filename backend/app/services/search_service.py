@@ -489,8 +489,8 @@ def _deduplicate(
             ov_start = max(kls, ls)
             ov_end   = min(kle, le)
             if ov_end >= ov_start:
-                item_len = max(le - ls + 1, 1)
-                if (ov_end - ov_start + 1) / item_len > 0.6:
+                shorter = max(min(le - ls + 1, kle - kls + 1), 1)
+                if (ov_end - ov_start + 1) / shorter > 0.4:
                     overlap = True
                     break
         if not overlap:

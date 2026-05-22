@@ -523,7 +523,7 @@ async def _build_results(
             file_path  = p.get("file_path", ""),
             line_start = p.get("line_start", 0),
             line_end   = p.get("line_end", 0),
-            snippet    = p.get("text", "")[:600],
+            snippet    = p.get("text", "")[:3000],
             score      = score_map.get(chunk_id, 0.0),
             language   = p.get("language", ""),
             chunk_type = p.get("chunk_type", "method"),

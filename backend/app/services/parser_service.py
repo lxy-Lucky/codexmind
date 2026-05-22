@@ -556,7 +556,7 @@ def _maybe_split(
     if _count_tokens(structured) <= settings.CHUNK_MAX_TOKENS:
         return [{
             "text":       structured,
-            "raw_code":   raw_code[:800],
+            "raw_code":   raw_code[:3000],
             "line_start": line_start,
             "line_end":   line_end,
             "chunk_type": chunk_type,
@@ -633,7 +633,7 @@ def _sliding_window_chunks(
 
         chunks.append({
             "text":       text,
-            "raw_code":   text[:800],
+            "raw_code":   text[:3000],
             "line_start": base_line + start_idx,
             "line_end":   base_line + end_idx - 1,
             "chunk_type": chunk_type,

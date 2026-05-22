@@ -331,7 +331,7 @@ async def _pass3_embed_bm25(
             "symbol":     chunk.get("symbol", ""),
             "class_name": chunk.get("class_name", ""),
             "symbol_id":  chunk.get("symbol_id", ""),
-            "text":       chunk.get("raw_code", chunk["text"][:800]),
+            "text":       chunk.get("raw_code", chunk["text"][:3000]),
         })
         bm25_docs.append({
             "chunk_id": chunk["chunk_id"],

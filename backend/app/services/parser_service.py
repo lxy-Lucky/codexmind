@@ -175,6 +175,39 @@ def _extract_leading_comment(text: str) -> str:
     return " ".join(comment_lines[:3])  # 最多 3 行
 
 
+def _find_comment_start(lines: list[str], method_line_0: int) -> int:
+    """
+    从方法声明行（0-indexed）向上查找前置 Javadoc / 行注释。
+
+    tree-sitter 的 method_declaration 节点起始于关键字行（如 public …），
+    而 Javadoc（/** … */）是父节点的兄弟节点，不在 method_declaration 内。
+    此函数向上扫描，找到注释的第一行并返回其 0-indexed 行号。
+    若无注释则返回 method_line_0（不改变起始行）。
+    """
+    idx = method_line_0 - 1
+    # 跳过空行和 @注解行（注解在方法签名和 Javadoc 之间很常见）
+    while idx >= 0:
+        stripped = lines[idx].strip()
+        if not stripped or stripped.startswith("@"):
+            idx -= 1
+        else:
+            break
+    if idx < 0:
+        return method_line_0
+
+    stripped = lines[idx].strip()
+    if stripped == "*/" or stripped.endswith("*/"):
+        # 块注释（Javadoc）结束符，向上找 /**
+        while idx >= 0:
+            if lines[idx].strip().startswith("/*"):
+                return idx   # 注释的起始行
+            idx -= 1
+        return method_line_0  # 没找到配对的 /*，放弃
+    elif stripped.startswith("//"):
+        return idx            # 单行注释，直接返回该行
+    return method_line_0
+
+
 # ── 结构化文档构建 ─────────────────────────────────────────────────────────────
 
 def _build_structured_text(
@@ -272,10 +305,14 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
             return
 
         if node.type in target_types and "class" not in node.type:
-            line_start = node.start_point[0] + 1
-            line_end   = node.end_point[0]   + 1
-            raw_code   = "\n".join(lines[line_start - 1: line_end])
-            symbol     = _extract_symbol(node, source_bytes)
+            method_line_0  = node.start_point[0]
+            line_end       = node.end_point[0] + 1
+            # 向上扩展到 Javadoc / 行注释（tree-sitter 的 method_declaration
+            # 节点不含前置注释，需要手动往上找）
+            comment_line_0 = _find_comment_start(lines, method_line_0)
+            line_start     = comment_line_0 + 1        # 1-indexed，含注释
+            raw_code       = "\n".join(lines[comment_line_0: line_end])
+            symbol         = _extract_symbol(node, source_bytes)
 
             # 跳过无业务价值的简单 getter / setter
             if _is_trivial_accessor(symbol, raw_code):

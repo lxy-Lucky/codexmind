@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
     EMBEDDING_DEVICE: str = "cuda"
     EMBEDDING_BATCH_SIZE: int = 8
-    EMBEDDING_MAX_LENGTH: int = 512
+    EMBEDDING_MAX_LENGTH: int = 1024
 
     # ── Ollama ──────────────────────────────────────
     OLLAMA_HOST: str = "http://localhost:11434"
@@ -43,8 +43,8 @@ class Settings(BaseSettings):
     LLM_TRIGGER_THRESHOLD: float = 0.55
 
     # ── Indexer ─────────────────────────────────────
-    CHUNK_MAX_TOKENS: int = 512
-    CHUNK_OVERLAP_TOKENS: int = 64
+    CHUNK_MAX_TOKENS: int = 800
+    CHUNK_OVERLAP_TOKENS: int = 80
     SUPPORTED_EXTENSIONS: str = ".java,.js,.ts,.jsx,.tsx,.vue,.xml"
 
     # ── BM25 ────────────────────────────────────────

@@ -23,7 +23,7 @@ from qdrant_client.http.models import PointStruct
 from app.core.config import settings
 from app.core.embedder import embed
 from app.core.qdrant_client import get_qdrant, ensure_collection, collection_name
-from app.core.neo4j_client import run_write, run_write_batch, run_query
+from app.core.neo4j_client import run_write, run_write_batch, run_query, run_autocommit
 from app.core.bm25_index import BM25Index, save_bm25, invalidate_bm25
 from app.services.repo_service import (
     SKIP_DIRS, SKIP_FILES, SKIP_SUFFIXES, VENDOR_VERSION_RE,
@@ -416,9 +416,12 @@ async def _neo4j_link_methods_to_classes(repo_id: str) -> None:
     为同 class_name 的 Method 和 Class 建 [:BELONGS_TO] 关系。
     使用 CALL { } IN TRANSACTIONS OF 300 ROWS（Neo4j 4.4+）分批提交，
     避免大库单事务超时断连。
+
+    注意：CALL {} IN TRANSACTIONS 只能在隐式事务（auto-commit）中运行，
+    必须用 run_autocommit 而不是 run_write（后者走 execute_write 显式事务）。
     """
     try:
-        await run_write(
+        await run_autocommit(
             """
             MATCH (m:Method {repo_id: $repo_id})
             WHERE m.class_name IS NOT NULL AND m.class_name <> ''
@@ -431,7 +434,7 @@ async def _neo4j_link_methods_to_classes(repo_id: str) -> None:
             {"repo_id": repo_id},
         )
     except Exception as e:
-        # 旧版 Neo4j 不支持 IN TRANSACTIONS，降级为逐批手动处理
+        # 该版本 Neo4j 不支持 IN TRANSACTIONS，降级为逐批手动处理
         logger.warning("IN TRANSACTIONS not supported, falling back: %s", e)
         rows = await run_query(
             "MATCH (c:Class {repo_id: $repo_id}) RETURN c.name AS name",

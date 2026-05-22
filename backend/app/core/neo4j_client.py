@@ -121,6 +121,31 @@ async def run_write(cypher: str, params: dict | None = None) -> None:
                 raise
 
 
+async def run_autocommit(cypher: str, params: dict | None = None) -> None:
+    """
+    以隐式事务（auto-commit / session.run）执行 Cypher。
+
+    CALL { } IN TRANSACTIONS 必须在隐式事务中运行；
+    用 execute_write 包一层显式事务会触发
+    Neo.DatabaseError.Transaction.TransactionStartFailed。
+    """
+    driver = get_neo4j()
+    _params = params or {}
+    for attempt in range(3):
+        try:
+            async with driver.session() as session:
+                result = await session.run(cypher, _params)
+                await result.consume()   # 确保服务端执行完毕
+            return
+        except Exception as e:
+            if attempt < 2:
+                wait = 1 << attempt
+                logger.warning("Neo4j autocommit retry %d/3 in %ds: %s", attempt + 1, wait, e)
+                await asyncio.sleep(wait)
+            else:
+                raise
+
+
 async def run_write_batch(cypher: str, batch: list[dict]) -> None:
     """
     批量写入，分块提交（每块 NEO4J_WRITE_CHUNK 行），每块独立重试。

@@ -81,11 +81,15 @@ function select(r: Repo) { repo.selectRepo(r) }
         >
           {{ r.name }}
         </div>
-        <div class="font-mono text-[10px] flex gap-2">
-          <span class="text-text-muted">{{ r.file_count }} {{ t('repo.fileSuffix') }}</span>
-          <span :class="STATUS_COLOR[r.indexed]">{{ t(STATUS_KEY[r.indexed]) }}</span>
-          <span v-if="r.skip_dirs?.length" class="text-amber/70">
-            {{ t('repo.skipPrefix', { n: r.skip_dirs.length }) }}
+        <div class="font-mono text-[10px] flex items-center gap-2 min-w-0">
+          <span class="text-text-muted flex-shrink-0">{{ r.file_count }} {{ t('repo.fileSuffix') }}</span>
+          <span :class="STATUS_COLOR[r.indexed]" class="flex-shrink-0">{{ t(STATUS_KEY[r.indexed]) }}</span>
+          <span
+            v-if="r.skip_dirs?.length"
+            class="skip-badge"
+            :title="t('repo.skipTitle', { n: r.skip_dirs.length })"
+          >
+            ⊘ {{ r.skip_dirs.length }}
           </span>
         </div>
       </div>
@@ -204,6 +208,11 @@ function select(r: Repo) { repo.selectRepo(r) }
 }
 .repo-icon {
   @apply w-6 h-6 rounded flex items-center justify-center font-mono text-[10px] font-bold text-white;
+}
+.skip-badge {
+  @apply inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full
+         bg-amber/10 border border-amber/30 text-amber text-[9px] font-semibold
+         flex-shrink-0 cursor-help;
 }
 .input-sm {
   @apply w-full bg-bg-elevated border border-border-dim rounded px-2.5 py-1.5

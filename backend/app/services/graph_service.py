@@ -50,18 +50,35 @@ async def get_method_graph(
     depth = min(depth, 5)
 
     # Step 1：收集 depth 跳内所有节点
-    # 使用 CALLS|IMPLEMENTS 联合扩展，IMPLEMENTS（Java interface → XML SQL）
-    # 不消耗深度——同一逻辑节点的两种表征，跨过它应该是免费的。
+    # IMPLEMENTS 作为"免费穿越"：在 CALLS 路径的基础上，每个节点额外展开 IMPLEMENTS 目标。
+    # 即 service -[CALLS]-> MapperInterface -[IMPLEMENTS]-> XmlSql 时，
+    # depth=1 就能看到 XmlSql（IMPLEMENTS 不占深度计数）。
     rows = await run_query(
         f"""
         MATCH (center:Method {{id: $symbol_id}})
         CALL {{
           WITH center
-          MATCH (center)-[:CALLS|IMPLEMENTS*0..{depth}]->(n:Method {{repo_id: $repo_id}})
+          MATCH (center)-[:CALLS*0..{depth}]->(n:Method {{repo_id: $repo_id}})
           RETURN n
           UNION
           WITH center
-          MATCH (n:Method {{repo_id: $repo_id}})-[:CALLS|IMPLEMENTS*1..{depth}]->(center)
+          MATCH (center)-[:CALLS*0..{depth}]->(m:Method {{repo_id: $repo_id}})-[:IMPLEMENTS]->(n:Method {{repo_id: $repo_id}})
+          RETURN n
+          UNION
+          WITH center
+          MATCH (n:Method {{repo_id: $repo_id}})-[:CALLS*1..{depth}]->(center)
+          RETURN n
+          UNION
+          WITH center
+          MATCH (n:Method {{repo_id: $repo_id}})-[:CALLS*1..{depth}]->(m:Method)-[:IMPLEMENTS]->(center)
+          RETURN n
+          UNION
+          WITH center
+          MATCH (center)-[:IMPLEMENTS]->(n:Method {{repo_id: $repo_id}})
+          RETURN n
+          UNION
+          WITH center
+          MATCH (n:Method {{repo_id: $repo_id}})-[:IMPLEMENTS]->(center)
           RETURN n
         }}
         WITH DISTINCT n
@@ -75,7 +92,7 @@ async def get_method_graph(
           n.line_end    AS line_end,
           coalesce(n.chunk_type, 'method') AS chunk_type,
           coalesce(n.pagerank, 0.0) AS pagerank,
-          size([(n)<-[:CALLS]-() | 1]) AS in_degree
+          coalesce(n.in_degree, size([(n)<-[:CALLS]-() | 1])) AS in_degree
         LIMIT 300
         """,
         {"symbol_id": symbol_id, "repo_id": repo_id},
@@ -143,13 +160,22 @@ async def get_impact(
     """
     max_depth = min(max_depth, 5)
 
-    # 反向追：从 target 出发，沿 CALLS 反向 + IMPLEMENTS 反向找上游
-    # （XML SQL 的"caller"是它的 Java interface 方法）
+    # 反向追：从 target 出发，沿 CALLS 反向找上游
+    # IMPLEMENTS 作为"免费穿越"：
+    #   若 target 是 sql，找 java interface 端作为附加目标
+    #   若 target 是 java，找 IMPLEMENTS 指向的 sql 端作为附加目标
     rows = await run_query(
         f"""
         MATCH (target:Method {{id: $symbol_id}})
-        MATCH path = (caller:Method {{repo_id: $repo_id}})-[:CALLS|IMPLEMENTS*1..{max_depth}]->(target)
-        WITH caller, length(path) AS hop
+        OPTIONAL MATCH (target)-[:IMPLEMENTS]->(sql_target:Method {{repo_id: $repo_id}})
+        OPTIONAL MATCH (java_target:Method {{repo_id: $repo_id}})-[:IMPLEMENTS]->(target)
+        WITH target,
+             collect(DISTINCT sql_target) + collect(DISTINCT java_target) AS linked
+        WITH target, linked + [target] AS all_targets
+        UNWIND all_targets AS t
+        MATCH path = (caller:Method {{repo_id: $repo_id}})-[:CALLS*1..{max_depth}]->(t)
+        WHERE caller.id <> target.id
+        WITH caller, min(length(path)) AS hop
         RETURN DISTINCT
           caller.id          AS id,
           caller.name        AS name,
@@ -159,8 +185,8 @@ async def get_impact(
           caller.line_end    AS line_end,
           coalesce(caller.chunk_type, 'method') AS chunk_type,
           coalesce(caller.pagerank, 0.0) AS pagerank,
-          size([(caller)<-[:CALLS]-() | 1]) AS in_degree,
-          min(hop) AS depth
+          coalesce(caller.in_degree, size([(caller)<-[:CALLS]-() | 1])) AS in_degree,
+          hop AS depth
         ORDER BY depth ASC, pagerank DESC
         LIMIT 100
         """,

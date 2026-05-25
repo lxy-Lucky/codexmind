@@ -101,25 +101,104 @@ _JS_FUNC_RE = re.compile(
     re.MULTILINE,
 )
 
+# ── Type Tracker（Java 字段/局部变量类型提取）─────────────────────────────────
+
+def _extract_field_types(class_node, src: bytes) -> dict[str, str]:
+    """
+    从 class_declaration 中提取字段声明，返回 {field_name: simple_type_name}。
+    用于 _walk_java_calls 将 receiver 变量名解析到真实类名（如 userMapper → UserMapper）。
+    只取简单类名（去包名 + 去泛型），足以匹配 symbol_map。
+    """
+    field_types: dict[str, str] = {}
+    for child in class_node.children:
+        if child.type != "class_body":
+            continue
+        for member in child.children:
+            if member.type != "field_declaration":
+                continue
+            type_node = member.child_by_field_name("type")
+            if not type_node:
+                continue
+            type_text = src[type_node.start_byte:type_node.end_byte].decode("utf-8", "replace")
+            # 去包名（取最后一段）+ 去泛型（取 < 之前）
+            simple = type_text.rsplit(".", 1)[-1].split("<")[0].strip()
+            if not simple:
+                continue
+            for decl in member.children:
+                if decl.type != "variable_declarator":
+                    continue
+                name_node = decl.child_by_field_name("name")
+                if name_node:
+                    fname = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+                    field_types[fname] = simple
+    return field_types
+
+
+def _extract_local_var_types(method_node, src: bytes) -> dict[str, str]:
+    """
+    从 method_declaration 中提取形参 + 局部变量声明，返回 {var_name: simple_type_name}。
+    与 _extract_field_types 格式一致，合并后传给 _walk_java_calls。
+    """
+    var_types: dict[str, str] = {}
+
+    def _walk_vars(node) -> None:
+        if node.type == "local_variable_declaration":
+            type_node = node.child_by_field_name("type")
+            if type_node:
+                type_text = src[type_node.start_byte:type_node.end_byte].decode("utf-8", "replace")
+                simple = type_text.rsplit(".", 1)[-1].split("<")[0].strip()
+                for child in node.children:
+                    if child.type == "variable_declarator":
+                        name_node = child.child_by_field_name("name")
+                        if name_node and simple:
+                            vname = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+                            var_types[vname] = simple
+        elif node.type == "formal_parameter":
+            type_node = node.child_by_field_name("type")
+            name_node = node.child_by_field_name("name")
+            if type_node and name_node:
+                type_text = src[type_node.start_byte:type_node.end_byte].decode("utf-8", "replace")
+                simple = type_text.rsplit(".", 1)[-1].split("<")[0].strip()
+                pname = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+                if simple:
+                    var_types[pname] = simple
+        for child in node.children:
+            _walk_vars(child)
+
+    _walk_vars(method_node)
+    return var_types
+
+
 # ── 调用提取（tree-sitter method_invocation）─────────────────────────────────
 
-def _extract_calls_from_tree(tree, src: bytes, language: str) -> list[str]:
-    """从 AST 提取方法调用，返回 'ClassName.methodName' 或 'methodName' 列表"""
+def _extract_calls_from_tree(
+    node_or_tree, src: bytes, language: str,
+    var_types: dict[str, str] | None = None,
+) -> list[str]:
+    """
+    从 AST 节点/树提取方法调用，返回 'ClassName.methodName' 或 'methodName' 列表。
+    node_or_tree 可以是整棵树（有 .root_node 属性）或单个 AST 节点（直接遍历）。
+    var_types 是 type tracker 映射（字段 + 局部变量），仅 Java 使用。
+    """
     calls: list[str] = []
+    # 兼容整棵树（旧调用路径）和单个节点（_extract_from_tree 内部优化路径）
+    root = node_or_tree.root_node if hasattr(node_or_tree, "root_node") else node_or_tree
 
     if language == "java":
-        _walk_java_calls(tree.root_node, src, calls)
+        _walk_java_calls(root, src, calls, var_types)
     elif language in ("javascript", "typescript"):
-        _walk_js_calls(tree.root_node, src, calls)
+        _walk_js_calls(root, src, calls)
 
     return list(dict.fromkeys(calls))  # 去重保序
 
 
-def _walk_java_calls(node, src: bytes, out: list[str]) -> None:
+def _walk_java_calls(
+    node, src: bytes, out: list[str],
+    var_types: dict[str, str] | None = None,
+) -> None:
     """
-    Java 调用提取。用 child_by_field_name 拿命名子节点，比"扫前两个 identifier 子节点"
-    可靠得多——对 a.b().c() / new Foo().bar() / this.field.call() 这类链式调用也能拿到
-    真正的方法名（出 callee）和最末段 receiver。
+    Java 调用提取。var_types 是 {变量名: 简单类名} 映射（字段 + 局部变量 + 形参），
+    用于将 receiver 变量名解析到真实类名：userMapper.selectById → UserMapper.selectById。
     """
     if node.type == "method_invocation":
         name_node = node.child_by_field_name("name")
@@ -132,7 +211,12 @@ def _walk_java_calls(node, src: bytes, out: list[str]) -> None:
             obj_text = src[obj_node.start_byte:obj_node.end_byte].decode("utf-8", "replace")
             # 链式：取最后一段作为 receiver 名（a.b.c → c；new Foo() → Foo）
             tail = obj_text.split(".")[-1]
-            obj = re.sub(r"[^\w]", "", tail.split("(")[0])
+            raw_obj = re.sub(r"[^\w]", "", tail.split("(")[0])
+            # type tracker：若 raw_obj 是已知变量名，用其声明类型替换
+            if var_types and raw_obj in var_types:
+                obj = var_types[raw_obj]
+            else:
+                obj = raw_obj
         if method:
             out.append(f"{obj}.{method}" if obj else method)
     elif node.type == "object_creation_expression":
@@ -144,7 +228,7 @@ def _walk_java_calls(node, src: bytes, out: list[str]) -> None:
             if ctor:
                 out.append(ctor)
     for child in node.children:
-        _walk_java_calls(child, src, out)
+        _walk_java_calls(child, src, out, var_types)
 
 
 def _walk_js_calls(node, src: bytes, out: list[str]) -> None:
@@ -327,15 +411,22 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
     target_types = NODE_TYPES.get(language, [])
     chunks: list[dict] = []
 
-    def walk(node, parent_class: str = ""):
+    def walk(node, parent_class: str = "", parent_field_types: dict[str, str] | None = None):
         if "class" in node.type and node.type in target_types:
             # 类名是 identifier 类型的直接子节点，用字节切片保证多字节正确
             for child in node.children:
                 if child.type == "identifier":
                     parent_class = source_bytes[child.start_byte:child.end_byte].decode("utf-8", "replace")
                     break
+            # 提取字段类型（Java 专用），供下层方法使用
+            field_types: dict[str, str] = {}
+            if language == "java":
+                try:
+                    field_types = _extract_field_types(node, source_bytes)
+                except Exception:
+                    pass
             for child in node.children:
-                walk(child, parent_class)
+                walk(child, parent_class, field_types)
             return
 
         if node.type in target_types and "class" not in node.type:
@@ -376,9 +467,15 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
             calls: list[str] = []
             if has_body:
                 try:
-                    raw_bytes = raw_code.encode("utf-8")
+                    # 直接在原 AST 节点上走 walk，不重新 parse raw_code（省 ~30% CPU）
+                    # 合并字段类型 + 局部变量/形参类型，传给 type tracker
+                    var_types: dict[str, str] = {}
+                    if language == "java":
+                        if parent_field_types:
+                            var_types.update(parent_field_types)
+                        var_types.update(_extract_local_var_types(node, source_bytes))
                     calls = _extract_calls_from_tree(
-                        _parse_subtree(raw_bytes, language), raw_bytes, language
+                        node, source_bytes, language, var_types
                     )
                 except Exception:
                     pass
@@ -402,7 +499,7 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
             return
 
         for child in node.children:
-            walk(child, parent_class)
+            walk(child, parent_class, parent_field_types)
 
     walk(tree.root_node)
     if not chunks:

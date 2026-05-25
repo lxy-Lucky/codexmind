@@ -289,25 +289,32 @@ async def _pass2_call_graph(
                     "confidence": per_conf if len(callee_ids) > 1 else conf_base,
                 })
 
-    # 批量写 Neo4j [:CALLS] 边（去重）
-    unique_edges = {(e["caller_id"], e["callee_id"]): e for e in edges}
-    if unique_edges:
+    # 按 (caller, callee) 去重并统计真实调用次数
+    edge_map: dict[tuple, dict] = {}
+    for e in edges:
+        key = (e["caller_id"], e["callee_id"])
+        if key not in edge_map:
+            e["call_count"] = 1
+            edge_map[key] = e
+        else:
+            edge_map[key]["call_count"] += 1
+    if edge_map:
         await run_write_batch(
             """
             UNWIND $rows AS row
             MATCH (caller:Method {id: row.caller_id})
             MATCH (callee:Method {id: row.callee_id})
             MERGE (caller)-[r:CALLS]->(callee)
-            ON CREATE SET r.confidence = row.confidence, r.call_count = 1
-            ON MATCH  SET r.call_count = r.call_count + 1
+            ON CREATE SET r.confidence = row.confidence, r.call_count = row.call_count
+            ON MATCH  SET r.call_count = r.call_count + row.call_count
             """,
-            list(unique_edges.values()),
+            list(edge_map.values()),
         )
 
     # 计算 PageRank（Neo4j GDS）
     await _compute_pagerank(repo_id)
 
-    logger.info("[%s] Pass2 done: %d call edges", repo_id, len(unique_edges))
+    logger.info("[%s] Pass2 done: %d call edges", repo_id, len(edge_map))
 
 
 async def _compute_pagerank(repo_id: str) -> None:

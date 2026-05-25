@@ -526,29 +526,51 @@ def _chunk_has_body(text: str, language: str) -> bool:
 
 
 # ── Getter / Setter 过滤 ───────────────────────────────────────────────────────
+# get/set 通常无业务价值；但 is/has 经常是工具方法（如 StringUtils.isEmpty
+# (Object[]) ），不能仅凭名字 + 行数粗暴过滤。新策略：方法体必须是"字面字段读写"
+# 才算 trivial，含任何方法调用、运算符、条件都保留索引。
 
-_ACCESSOR_PREFIX_RE = re.compile(r'^(?:get|set|is|has)[A-Z]')
+_GETTER_PREFIX_RE = re.compile(r'^(?:get|set)[A-Z]')
+
+# 字面字段读：return foo;   return this.foo;
+_TRIVIAL_GET_RE = re.compile(r"^\s*return\s+(?:this\.)?\w+\s*;?\s*$")
+# 字面字段写：this.foo = foo;   foo = bar;
+_TRIVIAL_SET_RE = re.compile(r"^\s*(?:this\.)?\w+\s*=\s*\w+\s*;?\s*$")
 
 
 def _is_trivial_accessor(symbol: str, raw_code: str) -> bool:
     """
-    判断是否为无业务价值的简单 getter / setter / is / has 方法，跳过以降低索引噪音。
+    判定真正"无业务价值"的 getter / setter，跳过以降低索引噪音。
 
-    判定条件（同时满足）：
-      1. 方法名以 get / set / is / has + 大写字母 开头
-      2. 有效代码行（去掉空行、纯括号行、注释行、注解行）≤ 3 行
-         典型 getter：签名行 + return 语句 = 2 行
-         带单行校验的 setter：签名行 + 赋值 = 2–3 行
+    判定要求（全部满足）：
+      1. 方法名以 get / set 开头（不再误伤 is / has —— ruoyi StringUtils.isEmpty
+         这种短小工具方法是用户真正想搜的对象）
+      2. 去掉签名、注释、注解、括号后，剩余 body 恰好 1 行
+      3. 该行是字面字段读/写（return foo;  /  this.foo = foo;），
+         任何方法调用、运算符、判断都不算 trivial
     """
-    if not symbol or not _ACCESSOR_PREFIX_RE.match(symbol):
+    if not symbol or not _GETTER_PREFIX_RE.match(symbol):
         return False
-    effective = [
-        l for l in raw_code.splitlines()
+
+    # 提取方法体：第一个 { 到最后一个 } 之间
+    first_brace = raw_code.find("{")
+    last_brace  = raw_code.rfind("}")
+    if first_brace < 0 or last_brace <= first_brace:
+        return False
+    body = raw_code[first_brace + 1: last_brace]
+
+    body_lines = [
+        l.strip()
+        for l in body.splitlines()
         if l.strip()
         and l.strip() not in ("{", "}")
         and not l.strip().startswith(("/", "*", "@"))
     ]
-    return len(effective) <= 3
+    if len(body_lines) != 1:
+        return False
+
+    line = body_lines[0]
+    return bool(_TRIVIAL_GET_RE.match(line) or _TRIVIAL_SET_RE.match(line))
 
 
 # ── maybe_split ───────────────────────────────────────────────────────────────

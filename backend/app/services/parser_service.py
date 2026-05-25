@@ -580,6 +580,9 @@ def _maybe_split(
             "raw_code":   raw_code[:3000],
             "line_start": line_start,
             "line_end":   line_end,
+            # method_line_* 表示完整方法范围；单 chunk 时与 chunk 自己的 line_* 一致
+            "method_line_start": line_start,
+            "method_line_end":   line_end,
             "chunk_type": chunk_type,
             "symbol":     symbol,
             "class_name": class_name,
@@ -601,12 +604,20 @@ def _maybe_split(
         max_tokens=code_window_tokens,
     )
     # 只有第一窗是"该方法的代表"（写 symbols 表、建 Method 节点、参与 call graph 连边）；
-    # 后续窗口共享同一 symbol_id，仅作为额外的 Qdrant/BM25 候选，避免：
+    # 后续窗口共享同一 symbol_id，仅作为额外的 Qdrant 候选，避免：
     #   1. 同名方法歧义 → 连边全丢
     #   2. 一个长方法占多个 top-k 名额
+    #
+    # method_line_* 在所有分窗上都标完整方法范围；
+    # chunk 自己的 line_start/line_end 仍是分窗范围（snippet 行号要准）。
+    # 这样：
+    #   - SQLite symbols 表用 method_line_*，光标在方法任何一行都能命中 primary
+    #   - Qdrant payload 用 chunk-local line_*，搜索结果显示精确分窗位置
     for i, w in enumerate(windows):
         w["text"] = meta_header + "\n\n" + w["text"]
         w["is_primary"] = (i == 0)
+        w["method_line_start"] = line_start
+        w["method_line_end"]   = line_end
     return windows
 
 
@@ -659,11 +670,16 @@ def _sliding_window_chunks(
             start_idx = max(end_idx - overlap_lines, start_idx + 1)
             continue
 
+        ls = base_line + start_idx
+        le = base_line + end_idx - 1
         chunks.append({
             "text":       text,
             "raw_code":   text[:3000],
-            "line_start": base_line + start_idx,
-            "line_end":   base_line + end_idx - 1,
+            "line_start": ls,
+            "line_end":   le,
+            # 默认 method 范围与 chunk 自身一致；_maybe_split 切窗时会覆盖为完整方法范围
+            "method_line_start": ls,
+            "method_line_end":   le,
             "chunk_type": chunk_type,
             "symbol":     symbol,
             "class_name": class_name,

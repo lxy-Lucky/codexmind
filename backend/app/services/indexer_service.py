@@ -159,6 +159,13 @@ async def _pass1_parse(
                 if class_name:
                     symbol_map.setdefault(f"{class_name}.{method_name}", []).append(symbol_id)
 
+            # method_line_* 是方法的完整行范围（含切窗时的所有窗口）。
+            # 对未切窗的 chunk 等价于自己的 line_*。
+            # 关键作用：让 /api/repo/{id}/symbol/at（光标 → 方法）
+            # 能在长方法的任何一行命中 primary chunk，否则点击依赖图按钮会失灵。
+            m_ls = chunk.get("method_line_start", chunk["line_start"])
+            m_le = chunk.get("method_line_end",   chunk["line_end"])
+
             # SQLite symbol 行
             symbol_rows.append({
                 "id":          symbol_id,
@@ -167,8 +174,8 @@ async def _pass1_parse(
                 "class_name":  class_name,
                 "method_name": method_name,
                 "signature":   chunk.get("signature", "")[:500],
-                "line_start":  chunk["line_start"],
-                "line_end":    chunk["line_end"],
+                "line_start":  m_ls,
+                "line_end":    m_le,
                 "chunk_id":    chunk_id,
             })
 
@@ -180,8 +187,8 @@ async def _pass1_parse(
                     "name":        method_name,
                     "class_name":  class_name,
                     "file_path":   rel_path,
-                    "line_start":  chunk["line_start"],
-                    "line_end":    chunk["line_end"],
+                    "line_start":  m_ls,
+                    "line_end":    m_le,
                     "signature":   chunk.get("signature", "")[:300],
                     "chunk_id":    chunk_id,
                 })
@@ -211,31 +218,33 @@ async def _pass1_parse(
 
 # ── Pass 2：调用边 + PageRank ──────────────────────────────────────────────────
 
-def _resolve_callee(
+def _resolve_callees(
     symbol_map: dict[str, list[str]],
     call_ref: str,
     caller_id: str,
-) -> str | None:
+) -> list[str]:
     """
-    无歧义 callee 解析：
-      - 精确匹配 call_ref（可能是 Class.method 形式）
-      - 若精确匹配有唯一结果 → 返回
-      - 若有多个候选 → 歧义，跳过（避免 log.info/println 等常用名误连边）
-      - 若精确匹配无结果且 call_ref 含 "."，则尝试仅取方法名部分
-      - 方法名部分也必须唯一才返回
+    返回 0..N 个 callee symbol_id。
+    策略：
+      - 精确匹配 call_ref（含 "."）：所有候选都连边。
+        典型场景是方法重载（`StringUtils.isEmpty(Object)` 和
+        `StringUtils.isEmpty(String)` 共享一个 key），不连等于"调用图全空"。
+        静态分析无法区分重载，宁可多连不可漏连。
+      - 精确匹配无结果且 call_ref 含 "."：用方法名做 fallback，仅唯一才连。
+        这一支处理的是 receiver 是变量名（不是类名）的情形——若方法名在
+        全 repo 里也歧义（如 `isEmpty`），直接放弃，避免连出一堆假边。
+      - call_ref 不含 "."（无 receiver，可能是静态导入）：唯一才连。
     """
     candidates = symbol_map.get(call_ref, [])
-    if len(candidates) == 1 and candidates[0] != caller_id:
-        return candidates[0]
-    if len(candidates) > 1:
-        return None   # 歧义，跳过
-    # 降级：只用方法名（去掉 receiver）
+    if candidates:
+        return [c for c in candidates if c != caller_id]
+
     if "." in call_ref:
         method_only = call_ref.rsplit(".", 1)[-1]
         by_name = symbol_map.get(method_only, [])
         if len(by_name) == 1 and by_name[0] != caller_id:
-            return by_name[0]
-    return None
+            return [by_name[0]]
+    return []
 
 
 async def _pass2_call_graph(
@@ -246,18 +255,27 @@ async def _pass2_call_graph(
 ) -> None:
     edges: list[dict] = []
 
+    # 只遍历 primary chunk：secondary 切窗共享 symbol_id 和 calls 列表，
+    # 再遍历会做完全重复的解析（unique_edges 会去重，但是浪费 CPU）。
     for chunk in all_chunks:
+        if not chunk.get("is_primary", True):
+            continue
         caller_id = chunk.get("symbol_id")
         if not caller_id:
             continue
         for call_ref in chunk.get("calls", []):
-            callee_id = _resolve_callee(symbol_map, call_ref, caller_id)
-            if callee_id:
+            callee_ids = _resolve_callees(symbol_map, call_ref, caller_id)
+            if not callee_ids:
+                continue
+            # 多 callee（重载）时按数量平分 confidence，保留"模糊调用"语义
+            conf_base = 1.0 if "." in call_ref else 0.7
+            per_conf  = conf_base / len(callee_ids)
+            for callee_id in callee_ids:
                 edges.append({
                     "caller_id":  caller_id,
                     "callee_id":  callee_id,
                     "callee_raw": call_ref,
-                    "confidence": 1.0 if "." in call_ref else 0.7,
+                    "confidence": per_conf if len(callee_ids) > 1 else conf_base,
                 })
 
     # 批量写 Neo4j [:CALLS] 边（去重）

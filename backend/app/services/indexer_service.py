@@ -153,8 +153,13 @@ async def _pass1_parse(
             if not is_primary:
                 continue
 
+            chunk_type = chunk.get("chunk_type", "method")
+
             # symbol_map 注册（支持同名方法：list 追加，Pass2 只取无歧义条目）
-            if method_name:
+            # SQL chunk 不进 symbol_map：service 调用 userMapper.foo 时只应解析到
+            # Java interface 方法；XML SQL 通过 IMPLEMENTS 边接入，避免 service
+            # 直接连到 SQL（语义不准，且制造无意义重边）。
+            if method_name and chunk_type != "sql":
                 symbol_map.setdefault(method_name, []).append(symbol_id)
                 if class_name:
                     symbol_map.setdefault(f"{class_name}.{method_name}", []).append(symbol_id)
@@ -179,7 +184,7 @@ async def _pass1_parse(
                 "chunk_id":    chunk_id,
             })
 
-            # Neo4j Method 节点
+            # Neo4j Method 节点（chunk_type 用于前端区分 Java 方法 vs XML SQL）
             if method_name:
                 neo4j_method_nodes.append({
                     "id":          symbol_id,
@@ -191,6 +196,7 @@ async def _pass1_parse(
                     "line_end":    m_le,
                     "signature":   chunk.get("signature", "")[:300],
                     "chunk_id":    chunk_id,
+                    "chunk_type":  chunk_type,
                 })
 
             # Neo4j Class 节点（去重）
@@ -211,8 +217,13 @@ async def _pass1_parse(
     await _neo4j_create_method_nodes(neo4j_method_nodes)
     await _neo4j_create_class_nodes(neo4j_class_nodes)
     await _neo4j_link_methods_to_classes(repo_id)
+    # MyBatis：Java interface method → XML SQL 的 IMPLEMENTS 边
+    # 按 (class_name, name) 匹配。前提是 mapper namespace 简名与 Java interface 类名一致
+    # （ruoyi / 大多数 MyBatis 工程都遵循此约定）。
+    impl_count = await _neo4j_link_interface_to_sql(repo_id)
 
-    logger.info("[%s] Pass1 done: %d chunks, %d symbols", repo_id, len(all_chunks), len(symbol_map))
+    logger.info("[%s] Pass1 done: %d chunks, %d symbols, %d IMPLEMENTS edges",
+                repo_id, len(all_chunks), len(symbol_map), impl_count)
     return all_chunks, symbol_map
 
 
@@ -417,7 +428,8 @@ async def _neo4j_create_method_nodes(nodes: list[dict]) -> None:
             m.line_start = row.line_start,
             m.line_end   = row.line_end,
             m.signature  = row.signature,
-            m.chunk_id   = row.chunk_id
+            m.chunk_id   = row.chunk_id,
+            m.chunk_type = coalesce(row.chunk_type, 'method')
         """,
         nodes,
     )
@@ -436,6 +448,29 @@ async def _neo4j_create_class_nodes(nodes: list[dict]) -> None:
         """,
         nodes,
     )
+
+
+async def _neo4j_link_interface_to_sql(repo_id: str) -> int:
+    """
+    建 Java interface method → XML SQL 的 [:IMPLEMENTS] 边。
+    匹配规则：(class_name, name) 相同；Java 一侧 chunk_type='method' 且文件以
+    .java 结尾，XML 一侧 chunk_type='sql'。
+    返回新建边数（用于日志）。
+    """
+    rows = await run_query(
+        """
+        MATCH (sql:Method {repo_id: $repo_id, chunk_type: 'sql'})
+        MATCH (java:Method {repo_id: $repo_id})
+        WHERE java.chunk_type = 'method'
+          AND java.class_name = sql.class_name
+          AND java.name       = sql.name
+          AND java.file_path ENDS WITH '.java'
+        MERGE (java)-[r:IMPLEMENTS]->(sql)
+        RETURN count(r) AS cnt
+        """,
+        {"repo_id": repo_id},
+    )
+    return rows[0]["cnt"] if rows else 0
 
 
 async def _neo4j_link_methods_to_classes(repo_id: str) -> None:

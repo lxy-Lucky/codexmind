@@ -16,6 +16,7 @@
         <span class="dot controller">Controller</span>
         <span class="dot service">Service</span>
         <span class="dot dao">DAO/Mapper</span>
+        <span class="dot sql">SQL</span>
         <span class="dot util">Util/Other</span>
       </div>
     </div>
@@ -100,6 +101,8 @@ let lastViewport = { W: 0, H: 0 }
 
 // ── Node color by layer ────────────────────────────────────────────────────
 function nodeColor(node: GraphNode): string {
+  // SQL 节点（MyBatis XML 语句）独立配色，比 DAO interface 更暖一档
+  if (node.node_type === 'sql')                                 return 'var(--color-sql,        #ec4899)'
   const fp = (node.file_path || '').toLowerCase()
   const nm = (node.name || '').toLowerCase()
   if (fp.includes('controller') || nm.includes('controller')) return 'var(--color-controller, #6366f1)'
@@ -110,7 +113,9 @@ function nodeColor(node: GraphNode): string {
 }
 
 function nodeRadius(node: GraphNode): number {
-  const base = node.node_type === 'class' ? 14 : 10
+  const base = node.node_type === 'class' ? 14
+             : node.node_type === 'sql'   ? 11   // SQL 略大一点
+             : 10
   return base + Math.min(node.in_degree * 0.8, 8)
 }
 
@@ -222,29 +227,52 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
     .force('x', d3.forceX(cx).strength(0.05))
     .force('y', d3.forceY(cy).strength(0.05))
 
-  // Edges
+  // Edges：CALLS 实线、IMPLEMENTS 虚线（Java interface → XML SQL 的桥接关系）
   const link = g.append('g').selectAll('line')
     .data(links).join('line')
-    .attr('stroke', '#94a3b8')
-    .attr('stroke-opacity', 0.5)
+    .attr('stroke', (d: any) => d.edge_type === 'IMPLEMENTS' ? '#ec4899' : '#94a3b8')
+    .attr('stroke-opacity', (d: any) => d.edge_type === 'IMPLEMENTS' ? 0.7 : 0.5)
     .attr('stroke-width', (d: any) => Math.min(Math.sqrt(d.call_count), 4))
+    .attr('stroke-dasharray', (d: any) => d.edge_type === 'IMPLEMENTS' ? '5,4' : null)
     .attr('marker-end', 'url(#arrow)')
 
-  // Nodes
-  const node = g.append('g').selectAll('circle')
-    .data(nodeData).join('circle')
+  // Nodes：SQL 节点用菱形（rect rotate 45°），其他用圆形
+  // d3 selectAll 多形状最干净的做法是各跑一轮 join
+  const sqlNodes    = nodeData.filter((d: any) => d.node_type === 'sql')
+  const otherNodes  = nodeData.filter((d: any) => d.node_type !== 'sql')
+
+  const nodeG = g.append('g')
+
+  // 圆形：普通方法 / Controller / Service / DAO interface
+  const circleSel = nodeG.selectAll('circle')
+    .data(otherNodes).join('circle')
     .attr('r', (d: any) => nodeRadius(d))
     .attr('fill', (d: any) => nodeColor(d))
     .attr('stroke', (d: any) => d.id === centerId ? '#fff' : 'none')
     .attr('stroke-width', 2.5)
     .style('cursor', 'pointer')
-    .on('mousemove', (evt, d: any) => {
+
+  // 菱形：SQL 语句
+  const diamondSel = nodeG.selectAll('rect.sql')
+    .data(sqlNodes).join('rect')
+    .attr('class', 'sql')
+    .attr('width',  (d: any) => nodeRadius(d) * 1.6)
+    .attr('height', (d: any) => nodeRadius(d) * 1.6)
+    .attr('fill', (d: any) => nodeColor(d))
+    .attr('stroke', (d: any) => d.id === centerId ? '#fff' : 'none')
+    .attr('stroke-width', 2.5)
+    .style('cursor', 'pointer')
+
+  // 统一行为绑定到两种 selection
+  const allNodes: any = circleSel.merge(diamondSel as any)
+  allNodes
+    .on('mousemove', (evt: MouseEvent, d: any) => {
       const rect = graphWrap.value!.getBoundingClientRect()
       hovered.value = d
       tooltipPos.value = { x: evt.clientX - rect.left + 12, y: evt.clientY - rect.top - 10 }
     })
     .on('mouseleave', () => { hovered.value = null })
-    .call(d3.drag<SVGCircleElement, any>()
+    .call(d3.drag<SVGElement, any>()
       .on('start', (e, d) => { if (!e.active) simulation!.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
       .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y })
       .on('end',   (e, d) => { if (!e.active) simulation!.alphaTarget(0); d.fx = null; d.fy = null })
@@ -273,9 +301,14 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
       .attr('y1', (d: any) => d.source.y)
       .attr('x2', (d: any) => d.target.x)
       .attr('y2', (d: any) => d.target.y)
-    node
+    circleSel
       .attr('cx', (d: any) => d.x)
       .attr('cy', (d: any) => d.y)
+    // 菱形：rect 用左上角定位，旋转 45° 后中心还在 (x, y)
+    diamondSel
+      .attr('x', (d: any) => d.x - nodeRadius(d) * 0.8)
+      .attr('y', (d: any) => d.y - nodeRadius(d) * 0.8)
+      .attr('transform', (d: any) => `rotate(45 ${d.x} ${d.y})`)
     label
       .attr('x', (d: any) => d.x)
       .attr('y', (d: any) => d.y)
@@ -485,6 +518,7 @@ onUnmounted(() => { simulation?.stop() })
 .dot.controller::before { background: #6366f1; }
 .dot.service::before    { background: #10b981; }
 .dot.dao::before        { background: #f59e0b; }
+.dot.sql::before        { background: #ec4899; transform: rotate(45deg); }
 .dot.util::before       { background: #64748b; }
 
 .graph-wrap {

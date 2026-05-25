@@ -7,7 +7,7 @@ export interface GraphNode {
   file_path: string
   line_start?: number
   line_end?: number
-  node_type: 'method' | 'class' | 'file'
+  node_type: 'method' | 'sql' | 'class' | 'file'
   pagerank: number
   in_degree: number
 }
@@ -15,6 +15,7 @@ export interface GraphNode {
 export interface GraphEdge {
   source: string
   target: string
+  edge_type?: 'CALLS' | 'IMPLEMENTS'
   confidence: number
   call_count: number
 }

@@ -11,7 +11,7 @@ class GraphNode(BaseModel):
     file_path: str
     line_start: Optional[int] = None
     line_end: Optional[int] = None
-    node_type: str = "method"    # method | class | file
+    node_type: str = "method"    # method | sql | class | file
     pagerank: float = 0.0
     in_degree: int = 0           # 被调用次数
 
@@ -19,6 +19,7 @@ class GraphNode(BaseModel):
 class GraphEdge(BaseModel):
     source: str                  # node id
     target: str                  # node id
+    edge_type: str = "CALLS"     # CALLS | IMPLEMENTS（Java interface → XML SQL）
     confidence: float = 1.0
     call_count: int = 1
 

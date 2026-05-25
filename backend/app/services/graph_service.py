@@ -50,16 +50,18 @@ async def get_method_graph(
     depth = min(depth, 5)
 
     # Step 1：收集 depth 跳内所有节点
+    # 使用 CALLS|IMPLEMENTS 联合扩展，IMPLEMENTS（Java interface → XML SQL）
+    # 不消耗深度——同一逻辑节点的两种表征，跨过它应该是免费的。
     rows = await run_query(
         f"""
         MATCH (center:Method {{id: $symbol_id}})
         CALL {{
           WITH center
-          MATCH (center)-[:CALLS*0..{depth}]->(n:Method {{repo_id: $repo_id}})
+          MATCH (center)-[:CALLS|IMPLEMENTS*0..{depth}]->(n:Method {{repo_id: $repo_id}})
           RETURN n
           UNION
           WITH center
-          MATCH (n:Method {{repo_id: $repo_id}})-[:CALLS*1..{depth}]->(center)
+          MATCH (n:Method {{repo_id: $repo_id}})-[:CALLS|IMPLEMENTS*1..{depth}]->(center)
           RETURN n
         }}
         WITH DISTINCT n
@@ -71,6 +73,7 @@ async def get_method_graph(
           n.file_path   AS file_path,
           n.line_start  AS line_start,
           n.line_end    AS line_end,
+          coalesce(n.chunk_type, 'method') AS chunk_type,
           coalesce(n.pagerank, 0.0) AS pagerank,
           size([(n)<-[:CALLS]-() | 1]) AS in_degree
         LIMIT 300
@@ -80,12 +83,13 @@ async def get_method_graph(
 
     node_ids = [r["id"] for r in rows if r.get("id")]
 
-    # Step 2：在节点 ID 集合内查边（索引扫描，O(|node_ids|²) 但 node_ids 很小）
+    # Step 2：在节点 ID 集合内查边（CALLS + IMPLEMENTS 都拿，前端区分样式）
     edge_rows = await run_query(
         """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
+        MATCH (a:Method)-[r:CALLS|IMPLEMENTS]->(b:Method)
         WHERE a.id IN $node_ids AND b.id IN $node_ids
         RETURN DISTINCT a.id AS src, b.id AS tgt,
+               type(r) AS edge_type,
                r.confidence AS conf, r.call_count AS cnt
         """,
         {"node_ids": node_ids},
@@ -99,7 +103,7 @@ async def get_method_graph(
             file_path  = r.get("file_path") or "",
             line_start = r.get("line_start"),
             line_end   = r.get("line_end"),
-            node_type  = "method",
+            node_type  = "sql" if r.get("chunk_type") == "sql" else "method",
             pagerank   = r.get("pagerank") or 0.0,
             in_degree  = r.get("in_degree") or 0,
         )
@@ -110,6 +114,7 @@ async def get_method_graph(
         GraphEdge(
             source     = r["src"],
             target     = r["tgt"],
+            edge_type  = r.get("edge_type") or "CALLS",
             confidence = r.get("conf") or 1.0,
             call_count = r.get("cnt") or 1,
         )
@@ -138,10 +143,12 @@ async def get_impact(
     """
     max_depth = min(max_depth, 5)
 
+    # 反向追：从 target 出发，沿 CALLS 反向 + IMPLEMENTS 反向找上游
+    # （XML SQL 的"caller"是它的 Java interface 方法）
     rows = await run_query(
         f"""
         MATCH (target:Method {{id: $symbol_id}})
-        MATCH path = (caller:Method {{repo_id: $repo_id}})-[:CALLS*1..{max_depth}]->(target)
+        MATCH path = (caller:Method {{repo_id: $repo_id}})-[:CALLS|IMPLEMENTS*1..{max_depth}]->(target)
         WITH caller, length(path) AS hop
         RETURN DISTINCT
           caller.id          AS id,
@@ -150,6 +157,7 @@ async def get_impact(
           caller.file_path   AS file_path,
           caller.line_start  AS line_start,
           caller.line_end    AS line_end,
+          coalesce(caller.chunk_type, 'method') AS chunk_type,
           coalesce(caller.pagerank, 0.0) AS pagerank,
           size([(caller)<-[:CALLS]-() | 1]) AS in_degree,
           min(hop) AS depth
@@ -159,14 +167,14 @@ async def get_impact(
         {"symbol_id": symbol_id, "repo_id": repo_id},
     )
 
-    # Collect node IDs from the caller rows + the target itself for edge lookup
     impact_node_ids = [r["id"] for r in rows if r.get("id")] + [symbol_id]
 
     edge_rows = await run_query(
         """
-        MATCH (a:Method)-[r:CALLS]->(b:Method)
+        MATCH (a:Method)-[r:CALLS|IMPLEMENTS]->(b:Method)
         WHERE a.id IN $node_ids AND b.id IN $node_ids
         RETURN DISTINCT a.id AS src, b.id AS tgt,
+               type(r) AS edge_type,
                r.confidence AS conf, r.call_count AS cnt
         """,
         {"node_ids": impact_node_ids},
@@ -180,7 +188,7 @@ async def get_impact(
             file_path  = r.get("file_path") or "",
             line_start = r.get("line_start"),
             line_end   = r.get("line_end"),
-            node_type  = "method",
+            node_type  = "sql" if r.get("chunk_type") == "sql" else "method",
             pagerank   = r.get("pagerank") or 0.0,
             in_degree  = r.get("in_degree") or 0,
         )
@@ -191,6 +199,7 @@ async def get_impact(
         GraphEdge(
             source     = r["src"],
             target     = r["tgt"],
+            edge_type  = r.get("edge_type") or "CALLS",
             confidence = r.get("conf") or 1.0,
             call_count = r.get("cnt") or 1,
         )

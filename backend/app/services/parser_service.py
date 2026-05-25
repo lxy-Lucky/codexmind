@@ -276,12 +276,21 @@ def parse_chunks(source: str, language: str, file_path: str) -> list[dict]:
       text        - 结构化文档（用于 embed）
       raw_code    - 原始代码（存 snippet 用）
       line_start / line_end
-      chunk_type  - method | class | block
+      chunk_type  - method | class | block | sql
       symbol      - method_name
       class_name
       signature
       calls       - 调用的方法名列表（用于构建 Call Graph）
     """
+    # MyBatis Mapper XML：每个 <select|insert|update|delete|sql id=...>
+    # 当作一个 method 同等对待，后续 indexer 会建 Method 节点 + IMPLEMENTS 边
+    if file_path.lower().endswith("mapper.xml"):
+        from app.services.mapper_xml_service import parse_mapper_xml
+        xml_chunks = parse_mapper_xml(source, file_path)
+        if xml_chunks:
+            return xml_chunks
+        # 非标准 mapper（无 namespace）→ 落回通用 xml sliding-window
+
     parser = _get_parser(language)
     if parser is not None:
         try:
@@ -339,26 +348,40 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
             raw_code       = "\n".join(lines[comment_line_0: line_end])
             symbol         = _extract_symbol(node, source_bytes)
 
-            # 内容质量检查：过滤空方法体 / 孤立括号碎片（如匿名类残留的 }）
-            if not _chunk_has_body(raw_code, language):
-                return
+            # 检测是否有 body：interface / abstract 方法没有 body，是合法 symbol，
+            # 仍需建索引（service 调用 Mapper.xxx 才有连边目标）。
+            has_body = (
+                node.child_by_field_name("body") is not None
+                if hasattr(node, "child_by_field_name") else
+                any(c.type in ("block", "constructor_body") for c in node.children)
+            )
 
-            # 跳过无业务价值的简单 getter / setter
-            if _is_trivial_accessor(symbol, raw_code):
-                return
+            if has_body:
+                # 内容质量检查：过滤空方法体 / 孤立括号碎片（如匿名类残留的 }）
+                if not _chunk_has_body(raw_code, language):
+                    return
+                # 跳过无业务价值的简单 getter / setter
+                if _is_trivial_accessor(symbol, raw_code):
+                    return
+            else:
+                # 无 body（interface / abstract 方法）：必须有名字才有索引价值
+                if not symbol:
+                    return
 
             signature  = _extract_signature(node, source_bytes, language)
             annotations = _extract_annotations(raw_code)
             comment    = _extract_leading_comment(raw_code)
 
+            # 无 body 的 interface / abstract 方法没有调用关系
             calls: list[str] = []
-            try:
-                raw_bytes = raw_code.encode("utf-8")
-                calls = _extract_calls_from_tree(
-                    _parse_subtree(raw_bytes, language), raw_bytes, language
-                )
-            except Exception:
-                pass
+            if has_body:
+                try:
+                    raw_bytes = raw_code.encode("utf-8")
+                    calls = _extract_calls_from_tree(
+                        _parse_subtree(raw_bytes, language), raw_bytes, language
+                    )
+                except Exception:
+                    pass
 
             structured = _build_structured_text(
                 raw_code    = raw_code,

@@ -12,7 +12,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.core.config import settings
 from app.core.qdrant_client import delete_collection, collection_info
-from app.core.bm25_index import invalidate_bm25
 from app.core.neo4j_client import run_query, run_write
 from app.db.database import get_db
 from app.models.repo import (
@@ -130,13 +129,15 @@ async def delete_repo(repo_id: str, db: aiosqlite.Connection = Depends(get_db)):
         except Exception as e:
             logger.warning("Delete Neo4j %s nodes failed: %s", label, e)
 
-    # 本地 BM25 pickle
+    # v3：BM25 已退役，旧版本可能在 data/bm25/ 留 pickle，清理一下
     try:
-        invalidate_bm25(repo_id)
+        pickle_path = settings.BM25_INDEX_DIR / f"{repo_id}.pkl"
+        if pickle_path.exists():
+            pickle_path.unlink()
     except Exception as e:
-        logger.warning("Delete BM25 index failed: %s", e)
+        logger.warning("Delete legacy BM25 pickle failed: %s", e)
 
-    # SQLite（foreign_keys=ON 已在 get_db 开启，CASCADE 自动清 symbols / bm25_meta / query_history）
+    # SQLite（foreign_keys=ON 已在 get_db 开启，CASCADE 自动清 symbols / query_history）
     await db.execute("DELETE FROM repos WHERE id=?", (repo_id,))
     # index_logs 没有 FK，手动清
     await db.execute("DELETE FROM index_logs WHERE repo_id=?", (repo_id,))

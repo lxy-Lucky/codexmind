@@ -18,13 +18,15 @@ from typing import Iterator, Optional
 
 import aiosqlite
 import aiofiles
-from qdrant_client.http.models import PointStruct
+from qdrant_client.http.models import PointStruct, SparseVector
 
 from app.core.config import settings
-from app.core.embedder import embed
-from app.core.qdrant_client import get_qdrant, ensure_collection, delete_collection, collection_name
+from app.core.embedder import embed_with_sparse, sparse_to_indices_values
+from app.core.qdrant_client import (
+    get_qdrant, ensure_collection, delete_collection, collection_name,
+    DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME,
+)
 from app.core.neo4j_client import run_write, run_write_batch, run_query, run_autocommit
-from app.core.bm25_index import BM25Index, save_bm25, invalidate_bm25
 from app.services.repo_service import (
     SKIP_DIRS, SKIP_FILES, SKIP_SUFFIXES, VENDOR_VERSION_RE,
     get_language, detect_encoding, _should_skip_dir,
@@ -54,7 +56,6 @@ async def run_index(
 
     # 清理旧数据（先清后建，确保 Qdrant 无残留）
     await _cleanup_old_data(db, repo_id)
-    invalidate_bm25(repo_id)
     await ensure_collection(repo_id)
 
     try:
@@ -66,9 +67,9 @@ async def run_index(
         await _update_status(db, repo_id, 1, "Pass 2: 构建调用图...")
         await _pass2_call_graph(repo_id, all_chunks, symbol_map, db)
 
-        # ── Pass 3：embed + BM25 ──────────────────────────────────────────
-        await _update_status(db, repo_id, 1, "Pass 3: 向量化索引...")
-        total_chunks = await _pass3_embed_bm25(repo_id, all_chunks, db)
+        # ── Pass 3：embed dense + sparse → Qdrant ─────────────────────────
+        await _update_status(db, repo_id, 1, "Pass 3: 向量化索引（dense + sparse）...")
+        total_chunks = await _pass3_embed(repo_id, all_chunks, db)
 
         # 完成
         symbol_count = len(symbol_map)
@@ -317,19 +318,23 @@ async def _compute_pagerank(repo_id: str) -> None:
                 pass
 
 
-# ── Pass 3：embed + Qdrant + BM25 ─────────────────────────────────────────────
+# ── Pass 3：embed dense + sparse → Qdrant ─────────────────────────────────────
 
-async def _pass3_embed_bm25(
+async def _pass3_embed(
     repo_id: str,
     all_chunks: list[dict],
     db: aiosqlite.Connection,
 ) -> int:
+    """
+    用 bge-m3 一次前向同时产出 dense 向量（语义）和 sparse 向量（多语言学习稀疏，
+    替代 BM25）。两路向量都写进 Qdrant 同一 collection 的 named vectors 槽位。
+    """
     client = get_qdrant()
     col = collection_name(repo_id)
 
     batch_texts: list[str] = []
     batch_meta:  list[dict] = []
-    bm25_docs:   list[dict] = []
+    batch_ids:   list[str] = []
     total = 0
 
     for chunk in all_chunks:
@@ -346,45 +351,35 @@ async def _pass3_embed_bm25(
             "symbol_id":  chunk.get("symbol_id", ""),
             "text":       chunk.get("raw_code", chunk["text"][:3000]),
         })
-        bm25_docs.append({
-            "chunk_id": chunk["chunk_id"],
-            "text":     chunk["text"],   # 结构化文本也进 BM25
-        })
+        batch_ids.append(chunk["chunk_id"])
         total += 1
 
         if len(batch_texts) >= BATCH_SIZE:
-            await _flush_qdrant(client, col, batch_texts, batch_meta,
-                                [c["chunk_id"] for c in all_chunks[total - BATCH_SIZE:total]])
-            batch_texts, batch_meta = [], []
+            await _flush_qdrant(client, col, batch_texts, batch_meta, batch_ids)
+            batch_texts, batch_meta, batch_ids = [], [], []
             await _log(db, repo_id, "INFO", f"已 embed {total} chunks")
 
     if batch_texts:
-        start = total - len(batch_texts)
-        await _flush_qdrant(client, col, batch_texts, batch_meta,
-                            [c["chunk_id"] for c in all_chunks[start:total]])
+        await _flush_qdrant(client, col, batch_texts, batch_meta, batch_ids)
 
-    # 构建 BM25
-    bm25_idx = BM25Index()
-    bm25_idx.build(bm25_docs)
-    idx_path = save_bm25(repo_id, bm25_idx)
-    await db.execute(
-        """INSERT OR REPLACE INTO bm25_meta(repo_id, index_path, doc_count)
-           VALUES (?, ?, ?)""",
-        (repo_id, str(idx_path), len(bm25_docs)),
-    )
-    await db.commit()
-
-    logger.info("[%s] Pass3 done: %d chunks embedded, BM25 built", repo_id, total)
+    logger.info("[%s] Pass3 done: %d chunks embedded (dense + sparse)", repo_id, total)
     return total
 
 
 async def _flush_qdrant(client, col: str, texts: list[str],
                         meta: list[dict], chunk_ids: list[str]) -> None:
-    vectors = await embed(texts)
-    points = [
-        PointStruct(id=cid, vector=vec, payload=m)
-        for cid, vec, m in zip(chunk_ids, vectors, meta)
-    ]
+    dense_vecs, sparse_vecs = await embed_with_sparse(texts)
+    points = []
+    for cid, dvec, svec, m in zip(chunk_ids, dense_vecs, sparse_vecs, meta):
+        indices, values = sparse_to_indices_values(svec)
+        points.append(PointStruct(
+            id=cid,
+            vector={
+                DENSE_VECTOR_NAME:  dvec,
+                SPARSE_VECTOR_NAME: SparseVector(indices=indices, values=values),
+            },
+            payload=m,
+        ))
     await client.upsert(collection_name=col, points=points, wait=False)
 
 
@@ -539,7 +534,6 @@ def _iter_code_files(
 async def _cleanup_old_data(db: aiosqlite.Connection, repo_id: str) -> None:
     """重新索引前清理旧数据"""
     await db.execute("DELETE FROM symbols WHERE repo_id=?", (repo_id,))
-    await db.execute("DELETE FROM bm25_meta WHERE repo_id=?", (repo_id,))
     await db.commit()
     # 删除 Qdrant collection（含所有旧向量点）；首次索引时 collection 可能不存在，忽略异常
     try:

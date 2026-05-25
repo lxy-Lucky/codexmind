@@ -19,7 +19,7 @@ async def get_db() -> aiosqlite.Connection:
         # 等待写锁最多 30s，与 indexer 保持一致，避免并发索引时 locked
         await db.execute("PRAGMA busy_timeout = 30000")
         # foreign_keys 是 per-connection 设置，必须每次打开都开启，否则
-        # ON DELETE CASCADE 不生效，删 repo 后会留下 symbols / bm25_meta / query_history 孤儿行
+        # ON DELETE CASCADE 不生效，删 repo 后会留下 symbols / query_history 孤儿行
         await db.execute("PRAGMA foreign_keys = ON")
         yield db
 
@@ -73,15 +73,6 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_symbols_chunk
                 ON symbols(chunk_id);
 
-            -- ── BM25 索引元数据（序列化文件路径）─────────────────────
-            CREATE TABLE IF NOT EXISTS bm25_meta (
-                repo_id    TEXT PRIMARY KEY,
-                index_path TEXT NOT NULL,       -- pickle 文件路径
-                doc_count  INTEGER DEFAULT 0,
-                built_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
-            );
-
             -- ── 索引日志 ──────────────────────────────────────────────
             CREATE TABLE IF NOT EXISTS index_logs (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,9 +100,10 @@ async def init_db() -> None:
         """)
         await db.commit()
 
-        # 旧库迁移：新增列，已存在时静默跳过
+        # 旧库迁移：新增列、移除废弃表（v3：BM25 退役，sparse 改走 bge-m3）
         for migration in [
             "ALTER TABLE repos ADD COLUMN skip_dirs TEXT DEFAULT '[]'",
+            "DROP TABLE IF EXISTS bm25_meta",
         ]:
             try:
                 await db.execute(migration)

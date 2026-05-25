@@ -7,12 +7,18 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import (
     Distance,
     VectorParams,
+    SparseVectorParams,
+    SparseIndexParams,
     PayloadSchemaType,
     HnswConfigDiff,
     ScalarQuantization,
     ScalarQuantizationConfig,
     ScalarType,
 )
+
+# collection 内的向量字段名（dense + sparse 都用具名向量）
+DENSE_VECTOR_NAME  = "dense"
+SPARSE_VECTOR_NAME = "sparse"
 
 from app.core.config import settings
 
@@ -50,11 +56,19 @@ async def ensure_collection(repo_id: str) -> None:
 
     await client.create_collection(
         collection_name=name,
-        vectors_config=VectorParams(
-            size=settings.vector_size,
-            distance=Distance.COSINE,
-            on_disk=False,          # 向量常驻内存，不走磁盘 mmap
-        ),
+        # Named vectors：dense（bge-m3 dense 1024d）+ sparse（bge-m3 lexical_weights）
+        vectors_config={
+            DENSE_VECTOR_NAME: VectorParams(
+                size=settings.vector_size,
+                distance=Distance.COSINE,
+                on_disk=False,          # 向量常驻内存，不走磁盘 mmap
+            ),
+        },
+        sparse_vectors_config={
+            SPARSE_VECTOR_NAME: SparseVectorParams(
+                index=SparseIndexParams(on_disk=False),
+            ),
+        },
         # HNSW：ef_construct 128 → 索引质量更好，搜索时 recall 更高
         hnsw_config=HnswConfigDiff(
             m=16,

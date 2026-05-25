@@ -37,11 +37,24 @@ class Settings(BaseSettings):
     # bge-m3 原生支持 8192；2048 在 chunk 表达力和显存间取平衡
     EMBEDDING_MAX_LENGTH: int = 2048
 
+    # ── Reranker（bge-reranker-v2-m3，多语言交叉编码器，对日/中/英都强）─
+    USE_RERANKER: bool = True
+    RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    RERANKER_DEVICE: str = "cuda"
+    RERANKER_TOP_K: int = 50          # 对融合后 top-50 候选做重排
+    RERANKER_BATCH_SIZE: int = 16
+
     # ── Ollama ──────────────────────────────────────
     OLLAMA_HOST: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "qwen2.5-coder:14b"
     OLLAMA_TIMEOUT: int = 120
     LLM_TRIGGER_THRESHOLD: float = 0.55
+
+    # ── HyDE（Hypothetical Document Embedding）─────────────
+    # 自然语言 query 时让 LLM 生成假想代码片段，embed 假想代码做检索。
+    # 跨"自然语言 → 代码"语义鸿沟特别有效。symbol_lookup / call_chain 跳过。
+    USE_HYDE: bool = True
+    HYDE_TIMEOUT: int = 8
 
     # ── Indexer ─────────────────────────────────────
     # 配合 EMBEDDING_MAX_LENGTH=2048：大多数业务方法一窗装得下，减少切窗碎片

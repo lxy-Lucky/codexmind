@@ -149,6 +149,14 @@ function select(r: Repo) { repo.selectRepo(r) }
           class="input-sm font-mono text-[11px]"
         />
         <div class="flex flex-col gap-1">
+          <div class="flex items-baseline justify-between gap-2">
+            <span class="font-mono text-[10px] text-text-secondary truncate">
+              {{ t('repo.form.skipLabel') }}
+            </span>
+            <span class="font-mono text-[9px] text-text-muted truncate">
+              {{ t('repo.form.skipHint') }}
+            </span>
+          </div>
           <textarea
             v-model="newSkipRaw"
             :placeholder="t('repo.form.skipPlaceholder')"

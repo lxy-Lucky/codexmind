@@ -66,7 +66,9 @@
     "form": {
       "namePlaceholder": "Repository name",
       "pathPlaceholder": "C:\\Users\\...\\my-project",
-      "skipPlaceholder": "Skip dirs (optional, one per line or comma-separated)\nExample:\nView\nWEB-INF/src/Property\nWEB-INF/sheet"
+      "skipLabel": "Skip dirs (optional)",
+      "skipHint": "One per line or comma-separated",
+      "skipPlaceholder": "e.g. View, dist, build"
     }
   },
   "search": {

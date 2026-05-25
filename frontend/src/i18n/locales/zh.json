@@ -66,7 +66,9 @@
     "form": {
       "namePlaceholder": "仓库名称",
       "pathPlaceholder": "C:\\Users\\...\\my-project",
-      "skipPlaceholder": "跳过目录（选填，一行一条或逗号分隔）\n例：\nView\nWEB-INF/src/Property\nWEB-INF/sheet"
+      "skipLabel": "跳过目录（选填）",
+      "skipHint": "一行一条或逗号分隔",
+      "skipPlaceholder": "例：View, dist, build"
     }
   },
   "search": {

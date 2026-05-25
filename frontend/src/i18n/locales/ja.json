@@ -66,7 +66,9 @@
     "form": {
       "namePlaceholder": "リポジトリ名",
       "pathPlaceholder": "C:\\Users\\...\\my-project",
-      "skipPlaceholder": "スキップディレクトリ（任意、1 行 1 件またはカンマ区切り）\n例：\nView\nWEB-INF/src/Property\nWEB-INF/sheet"
+      "skipLabel": "スキップ対象（任意）",
+      "skipHint": "1 行 1 件 または カンマ区切り",
+      "skipPlaceholder": "例：View, dist, build"
     }
   },
   "search": {

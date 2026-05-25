@@ -34,9 +34,6 @@ function onGlobalSearch(e: KeyboardEvent) {
 
     <!-- Right -->
     <div class="flex items-center gap-4">
-      <!-- Language switcher -->
-      <LanguageSwitcher />
-
       <!-- System status pill -->
       <div class="flex items-center gap-1.5 font-mono text-[11px] text-text-secondary
                   bg-bg-surface border border-border-dim px-3 py-1 rounded-full">
@@ -52,12 +49,8 @@ function onGlobalSearch(e: KeyboardEvent) {
         {{ repo.currentRepo.name }}
       </div>
 
-      <!-- Avatar -->
-      <div class="w-7 h-7 rounded-full border-2 border-border-bright flex items-center justify-center
-                  font-mono text-[11px] font-semibold text-cyan bg-bg-surface cursor-pointer
-                  hover:border-cyan transition-colors">
-        LY
-      </div>
+      <!-- Language avatar (replaces LY) -->
+      <LanguageSwitcher />
     </div>
   </header>
 </template>

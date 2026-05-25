@@ -35,7 +35,11 @@ def _get_tokenizer():
     # 与 EMBEDDING_MODEL 共用同一个 tokenizer，确保切窗判定与向量化截断口径一致。
     # bge-m3 基于 XLM-RoBERTa，CJK 通常 1 字 ≈ 1 token，cl100k_base 会高估 2-3 倍。
     from transformers import AutoTokenizer
-    return AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL)
+    tok = AutoTokenizer.from_pretrained(settings.EMBEDDING_MODEL)
+    # 仅用于 token 计数（用于"要不要切窗"判定）。超过 model max_length 不喂模型，
+    # 不会有 indexing error；设大上限消除 transformers 的 "sequence too long" warning。
+    tok.model_max_length = int(1e9)
+    return tok
 
 
 def _count_tokens(text: str) -> int:

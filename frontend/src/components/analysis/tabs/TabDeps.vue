@@ -18,6 +18,7 @@
         <span class="depth-val">{{ depth }}</span>
         <button @click="changeDepth(1)" :disabled="depth >= 5">+</button>
       </div>
+      <button class="recenter-btn" @click="fitToView" title="重置视图">⤢ 重置视图</button>
       <div class="legend">
         <span class="dot controller">Controller</span>
         <span class="dot service">Service</span>
@@ -87,6 +88,11 @@ const svgRef   = ref<SVGSVGElement>()
 const graphWrap = ref<HTMLDivElement>()
 
 let simulation: d3.Simulation<any, any> | null = null
+// 保存 zoom behavior、SVG selection、节点数据的引用，给"重置视图"按钮 / fitToView 用
+let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null
+let svgSel: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null
+let lastNodeData: any[] = []
+let lastViewport = { W: 0, H: 0 }
 
 // ── Node color by layer ────────────────────────────────────────────────────
 function nodeColor(node: GraphNode): string {
@@ -142,6 +148,7 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
 
   const W = graphWrap.value.clientWidth  || 800
   const H = graphWrap.value.clientHeight || 500
+  lastViewport = { W, H }
 
   // 清空旧图
   d3.select(svgRef.value).selectAll('*').remove()
@@ -150,13 +157,14 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
   const svg = d3.select(svgRef.value)
     .attr('width', W)
     .attr('height', H)
+  svgSel = svg
 
-  // Zoom
+  // Zoom（保存 behavior，供 fitToView / 重置视图按钮重新设置 transform）
   const g = svg.append('g')
-  svg.call(d3.zoom<SVGSVGElement, unknown>()
-    .scaleExtent([0.2, 3])
+  zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
+    .scaleExtent([0.1, 4])
     .on('zoom', (e) => g.attr('transform', e.transform))
-  )
+  svg.call(zoomBehavior)
 
   // Arrow marker
   svg.append('defs').append('marker')
@@ -169,20 +177,46 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
     .attr('d', 'M0,-4L8,0L0,4')
     .attr('fill', '#94a3b8')
 
-  // Build d3 node/link data
-  const nodeMap = new Map(nodes.map(n => [n.id, { ...n, x: W / 2, y: H / 2 }]))
+  // 节点初始位置：在中心周围一圈上均匀分布（不要全堆在 W/2,H/2，
+  // 否则 charge 一上来全炸出 viewport，肉眼看到的就是"图飞出去了"）
+  const cx = W / 2, cy = H / 2
+  const ringR = Math.min(W, H) * 0.25
+  const nodeMap = new Map(
+    nodes.map((n, i) => {
+      const angle = (i / Math.max(nodes.length, 1)) * 2 * Math.PI
+      const x = n.id === centerId ? cx : cx + Math.cos(angle) * ringR
+      const y = n.id === centerId ? cy : cy + Math.sin(angle) * ringR
+      return [n.id, { ...n, x, y }]
+    })
+  )
+  // 中心节点钉在视口中心，不让 force 把它甩走
+  const centerNode = nodeMap.get(centerId) as any
+  if (centerNode) {
+    centerNode.fx = cx
+    centerNode.fy = cy
+  }
+
   const links = edges
     .filter(e => nodeMap.has(e.source) && nodeMap.has(e.target))
     .map(e => ({ ...e, source: nodeMap.get(e.source)!, target: nodeMap.get(e.target)! }))
 
   const nodeData = Array.from(nodeMap.values())
+  lastNodeData = nodeData
+
+  // Force 参数随节点数量自适应：节点多 → 减小斥力 + 缩短连线，避免铺满屏幕外
+  const N = nodeData.length
+  const chargeStrength = N > 60 ? -80 : N > 30 ? -180 : -280
+  const linkDistance   = N > 60 ?  55 : N > 30 ?   75 :   95
 
   // Simulation
   simulation = d3.forceSimulation(nodeData)
-    .force('link', d3.forceLink(links).id((d: any) => d.id).distance(90).strength(0.5))
-    .force('charge', d3.forceManyBody().strength(-300))
-    .force('center', d3.forceCenter(W / 2, H / 2))
+    .force('link', d3.forceLink(links).id((d: any) => d.id).distance(linkDistance).strength(0.5))
+    .force('charge', d3.forceManyBody().strength(chargeStrength))
+    .force('center', d3.forceCenter(cx, cy).strength(0.08))   // 弱中心力，配合 ring init
     .force('collide', d3.forceCollide().radius((d: any) => nodeRadius(d) + 6))
+    // X/Y 软约束：把节点往视口内拉，等效于"边界弹性墙"
+    .force('x', d3.forceX(cx).strength(0.05))
+    .force('y', d3.forceY(cy).strength(0.05))
 
   // Edges
   const link = g.append('g').selectAll('line')
@@ -222,7 +256,14 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
     .attr('dy', (d: any) => nodeRadius(d) + 13)
     .style('pointer-events', 'none')
 
+  // 硬边界：tick 内把节点位置 clamp 到 [pad, W-pad] × [pad, H-pad]，
+  // 哪怕 force 算出来 fly-off-screen，渲染前也拉回来
+  const pad = 40
   simulation.on('tick', () => {
+    nodeData.forEach((d: any) => {
+      d.x = Math.max(pad, Math.min(W - pad, d.x))
+      d.y = Math.max(pad, Math.min(H - pad, d.y))
+    })
     link
       .attr('x1', (d: any) => d.source.x)
       .attr('y1', (d: any) => d.source.y)
@@ -235,6 +276,41 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
       .attr('x', (d: any) => d.x)
       .attr('y', (d: any) => d.y)
   })
+
+  // simulation 冷却完成后，按节点包围盒自动缩放使整图刚好充满视口
+  simulation.on('end', () => fitToView())
+}
+
+
+// ── 视图自适应 ─────────────────────────────────────────────────────────────
+// 计算当前所有节点包围盒，平移+缩放使其居中铺满。被 simulation.on('end') 和
+// 工具栏「重置视图」按钮共用。
+function fitToView() {
+  if (!svgSel || !zoomBehavior || !lastNodeData.length) return
+  const { W, H } = lastViewport
+  if (!W || !H) return
+
+  const xs = lastNodeData.map((d: any) => d.x)
+  const ys = lastNodeData.map((d: any) => d.y)
+  const minX = Math.min(...xs), maxX = Math.max(...xs)
+  const minY = Math.min(...ys), maxY = Math.max(...ys)
+  const w = maxX - minX || 1
+  const h = maxY - minY || 1
+
+  // padding 给标签留位置
+  const padInner = 60
+  const scale = Math.min(
+    (W - padInner * 2) / w,
+    (H - padInner * 2) / h,
+    1.4,    // 节点少时也别放太大
+  )
+  const tx = W / 2 - scale * (minX + w / 2)
+  const ty = H / 2 - scale * (minY + h / 2)
+
+  svgSel.transition().duration(400).call(
+    zoomBehavior.transform,
+    d3.zoomIdentity.translate(tx, ty).scale(scale)
+  )
 }
 
 // ── Controls ───────────────────────────────────────────────────────────────
@@ -357,6 +433,20 @@ onUnmounted(() => { simulation?.stop() })
 }
 .depth-control button:disabled { opacity: 0.3; cursor: not-allowed; }
 .depth-val { font-weight: 600; color: #fff; min-width: 14px; text-align: center; }
+
+.recenter-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #1e293b);
+  background: transparent;
+  color: var(--text-secondary, #94a3b8);
+  font-size: 11px;
+  cursor: pointer;
+}
+.recenter-btn:hover {
+  color: #fff;
+  border-color: var(--accent, #6366f1);
+}
 
 .legend {
   display: flex;

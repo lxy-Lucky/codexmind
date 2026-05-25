@@ -265,6 +265,88 @@ async def symbol_at_line(
 
 # ── 索引日志 ──────────────────────────────────────────────────────────────────
 
+@router.get("/{repo_id}/index/stats", summary="索引统计（按 language / chunk_type 分组）")
+async def index_stats(repo_id: str, db: aiosqlite.Connection = Depends(get_db)):
+    """
+    诊断用：返回该 repo 在 Qdrant / Neo4j / SQLite 中的分布情况。
+    便于排查"为什么搜不到某种类型的文件"——比如 XML mapper 没建索引时
+    qdrant.by_language.xml 就会是 0。
+    """
+    row = await _fetch_repo(db, repo_id)
+    if not row:
+        raise HTTPException(404, "仓库不存在")
+
+    stats: dict[str, Any] = {"repo_id": repo_id}
+
+    # ── Qdrant：按 language / chunk_type 分别 count ───────────────────────
+    from app.core.qdrant_client import get_qdrant, collection_name
+    from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+    client = get_qdrant()
+    col = collection_name(repo_id)
+
+    qdrant_stats: dict[str, Any] = {}
+    try:
+        info = await client.get_collection(collection_name=col)
+        qdrant_stats["total_points"] = info.points_count or 0
+    except Exception as e:
+        qdrant_stats["error"] = f"collection not found: {e}"
+
+    by_language: dict[str, int] = {}
+    by_chunk_type: dict[str, int] = {}
+    for lang in ("java", "javascript", "typescript", "xml", "vue"):
+        try:
+            r = await client.count(
+                collection_name=col, exact=True,
+                count_filter=Filter(must=[FieldCondition(
+                    key="language", match=MatchValue(value=lang))]),
+            )
+            by_language[lang] = r.count
+        except Exception:
+            pass
+    for ct in ("method", "sql", "block", "class"):
+        try:
+            r = await client.count(
+                collection_name=col, exact=True,
+                count_filter=Filter(must=[FieldCondition(
+                    key="chunk_type", match=MatchValue(value=ct))]),
+            )
+            by_chunk_type[ct] = r.count
+        except Exception:
+            pass
+    qdrant_stats["by_language"]   = by_language
+    qdrant_stats["by_chunk_type"] = by_chunk_type
+    stats["qdrant"] = qdrant_stats
+
+    # ── SQLite symbols：按 file_path 后缀分组 ────────────────────────────
+    async with db.execute(
+        "SELECT file_path FROM symbols WHERE repo_id=?", (repo_id,)
+    ) as cur:
+        rows = await cur.fetchall()
+    by_ext: dict[str, int] = {}
+    for r in rows:
+        fp = r["file_path"] or ""
+        ext = fp.rsplit(".", 1)[-1].lower() if "." in fp else "<noext>"
+        by_ext[ext] = by_ext.get(ext, 0) + 1
+    stats["sqlite_symbols_by_ext"] = by_ext
+    stats["sqlite_symbols_total"]  = len(rows)
+
+    # ── Neo4j Method 节点按 chunk_type ───────────────────────────────────
+    try:
+        from app.core.neo4j_client import run_query
+        rows = await run_query(
+            """
+            MATCH (m:Method {repo_id: $repo_id})
+            RETURN coalesce(m.chunk_type,'method') AS ct, count(m) AS cnt
+            """,
+            {"repo_id": repo_id},
+        )
+        stats["neo4j_method_by_type"] = {r["ct"]: r["cnt"] for r in rows}
+    except Exception as e:
+        stats["neo4j_method_by_type"] = {"error": str(e)}
+
+    return stats
+
+
 @router.get("/{repo_id}/index/logs")
 async def get_index_logs(
     repo_id: str,

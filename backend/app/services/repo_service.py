@@ -217,25 +217,52 @@ def scan_file_tree(
     return nodes
 
 
+def _is_indexable_file(dirpath: str, fname: str) -> Optional[str]:
+    """
+    返回该文件实际会被索引时识别出的 language，否则 None。
+    与 indexer_service._iter_code_files 的过滤规则保持一致，
+    避免 file_count 远大于真实入库数。
+    """
+    fname_lower = fname.lower()
+    if fname_lower in SKIP_FILES:
+        return None
+    if any(fname_lower.endswith(s) for s in SKIP_SUFFIXES):
+        return None
+    if VENDOR_VERSION_RE.match(fname_lower):
+        return None
+    fpath = Path(dirpath) / fname
+    lang = get_language(fpath)
+    if not lang or fpath.suffix.lower() not in settings.supported_ext_set:
+        return None
+    # XML 白名单：只算 MyBatis Mapper
+    if fpath.suffix.lower() == ".xml" and not fname_lower.endswith("mapper.xml"):
+        return None
+    try:
+        if fpath.stat().st_size > 500_000:
+            return None
+    except OSError:
+        return None
+    return lang
+
+
 def count_code_files(root: Path) -> int:
-    """统计 root 下支持的代码文件数量"""
+    """统计 root 下实际会被索引的代码文件数量（与 indexer 同口径）"""
     count = 0
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for f in filenames:
-            ext = Path(f).suffix.lower()
-            if ext in settings.supported_ext_set:
+            if _is_indexable_file(dirpath, f):
                 count += 1
     return count
 
 
 def detect_primary_language(root: Path) -> Optional[str]:
-    """统计各语言文件数，返回占比最高的语言"""
+    """统计各语言文件数，返回占比最高的语言（与 count_code_files 同口径）"""
     counter: dict[str, int] = {}
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for f in filenames:
-            lang = get_language(Path(f))
+            lang = _is_indexable_file(dirpath, f)
             if lang:
                 counter[lang] = counter.get(lang, 0) + 1
     if not counter:

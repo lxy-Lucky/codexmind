@@ -18,6 +18,9 @@ async def get_db() -> aiosqlite.Connection:
         # WAL 模式已在 init_db 中持久化设置，此处只设超时
         # 等待写锁最多 30s，与 indexer 保持一致，避免并发索引时 locked
         await db.execute("PRAGMA busy_timeout = 30000")
+        # foreign_keys 是 per-connection 设置，必须每次打开都开启，否则
+        # ON DELETE CASCADE 不生效，删 repo 后会留下 symbols / bm25_meta / query_history 孤儿行
+        await db.execute("PRAGMA foreign_keys = ON")
         yield db
 
 

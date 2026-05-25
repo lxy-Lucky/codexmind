@@ -12,6 +12,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.core.config import settings
 from app.core.qdrant_client import delete_collection, collection_info
+from app.core.bm25_index import invalidate_bm25
+from app.core.neo4j_client import run_query, run_write
 from app.db.database import get_db
 from app.models.repo import (
     FileContentResponse,
@@ -101,11 +103,43 @@ async def delete_repo(repo_id: str, db: aiosqlite.Connection = Depends(get_db)):
     row = await _fetch_repo(db, repo_id)
     if not row:
         raise HTTPException(404, "仓库不存在")
+    if dict(row)["indexed"] == 1:
+        # 索引正在跑，删除会和后台任务 race
+        raise HTTPException(409, "索引进行中，无法删除")
+
+    # Qdrant collection
     try:
         await delete_collection(repo_id)
     except Exception as e:
         logger.warning("Delete Qdrant collection failed: %s", e)
+
+    # Neo4j 节点（必须带 Label，否则全图扫描）
+    for label in ("Method", "Class", "File"):
+        try:
+            while True:
+                cnt_rows = await run_query(
+                    f"MATCH (n:{label} {{repo_id: $repo_id}}) RETURN count(n) AS cnt",
+                    {"repo_id": repo_id},
+                )
+                if not cnt_rows or cnt_rows[0].get("cnt", 0) == 0:
+                    break
+                await run_write(
+                    f"MATCH (n:{label} {{repo_id: $repo_id}}) WITH n LIMIT 200 DETACH DELETE n",
+                    {"repo_id": repo_id},
+                )
+        except Exception as e:
+            logger.warning("Delete Neo4j %s nodes failed: %s", label, e)
+
+    # 本地 BM25 pickle
+    try:
+        invalidate_bm25(repo_id)
+    except Exception as e:
+        logger.warning("Delete BM25 index failed: %s", e)
+
+    # SQLite（foreign_keys=ON 已在 get_db 开启，CASCADE 自动清 symbols / bm25_meta / query_history）
     await db.execute("DELETE FROM repos WHERE id=?", (repo_id,))
+    # index_logs 没有 FK，手动清
+    await db.execute("DELETE FROM index_logs WHERE repo_id=?", (repo_id,))
     await db.commit()
 
 
@@ -287,4 +321,6 @@ async def _run_index_bg(
         await db.execute("PRAGMA busy_timeout = 30000")
         await db.execute("PRAGMA journal_mode = WAL")
         await db.execute("PRAGMA synchronous = NORMAL")
+        # foreign_keys 是 per-connection 设置
+        await db.execute("PRAGMA foreign_keys = ON")
         await indexer_service.run_index(repo_id, root_path, db, extra_skip_dirs)

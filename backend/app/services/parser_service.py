@@ -116,16 +116,33 @@ def _extract_calls_from_tree(tree, src: bytes, language: str) -> list[str]:
 
 
 def _walk_java_calls(node, src: bytes, out: list[str]) -> None:
+    """
+    Java 调用提取。用 child_by_field_name 拿命名子节点，比"扫前两个 identifier 子节点"
+    可靠得多——对 a.b().c() / new Foo().bar() / this.field.call() 这类链式调用也能拿到
+    真正的方法名（出 callee）和最末段 receiver。
+    """
     if node.type == "method_invocation":
-        # object.method() 或 method()
-        children = list(node.children)
-        names = [c for c in children if c.type == "identifier"]
-        if len(names) >= 2:
-            obj    = src[names[0].start_byte:names[0].end_byte].decode("utf-8", "replace")
-            method = src[names[1].start_byte:names[1].end_byte].decode("utf-8", "replace")
-            out.append(f"{obj}.{method}")
-        elif len(names) == 1:
-            out.append(src[names[0].start_byte:names[0].end_byte].decode("utf-8", "replace"))
+        name_node = node.child_by_field_name("name")
+        obj_node  = node.child_by_field_name("object")
+        method = ""
+        obj = ""
+        if name_node is not None:
+            method = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+        if obj_node is not None:
+            obj_text = src[obj_node.start_byte:obj_node.end_byte].decode("utf-8", "replace")
+            # 链式：取最后一段作为 receiver 名（a.b.c → c；new Foo() → Foo）
+            tail = obj_text.split(".")[-1]
+            obj = re.sub(r"[^\w]", "", tail.split("(")[0])
+        if method:
+            out.append(f"{obj}.{method}" if obj else method)
+    elif node.type == "object_creation_expression":
+        # new Foo(...)  → "Foo" 当成调用（构造器）
+        type_node = node.child_by_field_name("type")
+        if type_node is not None:
+            ctor = src[type_node.start_byte:type_node.end_byte].decode("utf-8", "replace").split(".")[-1]
+            ctor = re.sub(r"[^\w]", "", ctor)
+            if ctor:
+                out.append(ctor)
     for child in node.children:
         _walk_java_calls(child, src, out)
 
@@ -568,6 +585,8 @@ def _maybe_split(
             "class_name": class_name,
             "signature":  signature,
             "calls":      calls,
+            # 单 chunk 即代表该方法
+            "is_primary": True,
         }]
 
     # 超长方法：提取元数据头，每个分窗都携带，避免大方法的 chunk 成为裸代码
@@ -581,8 +600,13 @@ def _maybe_split(
         symbol=symbol, class_name=class_name, signature=signature, calls=calls,
         max_tokens=code_window_tokens,
     )
-    for w in windows:
+    # 只有第一窗是"该方法的代表"（写 symbols 表、建 Method 节点、参与 call graph 连边）；
+    # 后续窗口共享同一 symbol_id，仅作为额外的 Qdrant/BM25 候选，避免：
+    #   1. 同名方法歧义 → 连边全丢
+    #   2. 一个长方法占多个 top-k 名额
+    for i, w in enumerate(windows):
         w["text"] = meta_header + "\n\n" + w["text"]
+        w["is_primary"] = (i == 0)
     return windows
 
 
@@ -645,6 +669,9 @@ def _sliding_window_chunks(
             "class_name": class_name,
             "signature":  signature,
             "calls":      calls or [],
+            # _maybe_split 调用时会覆写此字段；直接调用（xml/yaml fallback）时
+            # 每个窗都是独立 doc，全部 primary
+            "is_primary": True,
         })
 
         overlap_lines = max(1, overlap // 10)

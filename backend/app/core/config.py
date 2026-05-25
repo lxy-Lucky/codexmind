@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
     EMBEDDING_DEVICE: str = "cuda"
     EMBEDDING_BATCH_SIZE: int = 8
-    EMBEDDING_MAX_LENGTH: int = 1024
+    # bge-m3 原生支持 8192；2048 在 chunk 表达力和显存间取平衡
+    EMBEDDING_MAX_LENGTH: int = 2048
 
     # ── Ollama ──────────────────────────────────────
     OLLAMA_HOST: str = "http://localhost:11434"
@@ -43,8 +44,9 @@ class Settings(BaseSettings):
     LLM_TRIGGER_THRESHOLD: float = 0.55
 
     # ── Indexer ─────────────────────────────────────
-    CHUNK_MAX_TOKENS: int = 800
-    CHUNK_OVERLAP_TOKENS: int = 80
+    # 配合 EMBEDDING_MAX_LENGTH=2048：大多数业务方法一窗装得下，减少切窗碎片
+    CHUNK_MAX_TOKENS: int = 1500
+    CHUNK_OVERLAP_TOKENS: int = 150
     SUPPORTED_EXTENSIONS: str = ".java,.js,.ts,.jsx,.tsx,.vue,.xml"
 
     # ── BM25 ────────────────────────────────────────
@@ -72,10 +74,8 @@ class Settings(BaseSettings):
         if not self.allowed_roots:
             return True
         resolved = path.resolve()
-        return any(
-            str(resolved).startswith(str(root.resolve()))
-            for root in self.allowed_roots
-        )
+        # 用 is_relative_to 而非 str.startswith，避免 /home/user/repos 误匹配 /home/user/repos2
+        return any(resolved.is_relative_to(root.resolve()) for root in self.allowed_roots)
 
     @property
     def vector_size(self) -> int:

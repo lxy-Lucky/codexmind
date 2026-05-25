@@ -14,7 +14,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 import aiosqlite
 import aiofiles
@@ -124,9 +124,19 @@ async def _pass1_parse(
 
         chunks = parse_chunks(source, language, rel_path)
         class_ids_in_file: dict[str, str] = {}
+        # 切窗后的多个 chunk 共享同一 symbol_id：parser 标 is_primary=True 的是
+        # 该方法的代表，is_primary=False 的窗继承前一个 primary 的 symbol_id。
+        last_primary_symbol_id: Optional[str] = None
 
         for chunk in chunks:
-            symbol_id = str(uuid.uuid4())
+            is_primary = chunk.get("is_primary", True)
+            if is_primary:
+                symbol_id = str(uuid.uuid4())
+                last_primary_symbol_id = symbol_id
+            else:
+                # 继承上一个 primary 的 symbol_id；若意外缺失（不应发生）则降级为独立
+                symbol_id = last_primary_symbol_id or str(uuid.uuid4())
+
             chunk_id  = str(uuid.uuid4())   # 将在 Pass3 写入 Qdrant
             chunk["symbol_id"] = symbol_id
             chunk["chunk_id"]  = chunk_id
@@ -136,6 +146,11 @@ async def _pass1_parse(
 
             method_name = chunk.get("symbol", "")
             class_name  = chunk.get("class_name", "")
+            all_chunks.append(chunk)
+
+            # 以下只对 primary chunk 生效：避免同名方法歧义 + 一个长方法占多个 top-k 名额
+            if not is_primary:
+                continue
 
             # symbol_map 注册（支持同名方法：list 追加，Pass2 只取无歧义条目）
             if method_name:
@@ -180,8 +195,6 @@ async def _pass1_parse(
                     "name":     class_name,
                     "file_path": rel_path,
                 })
-
-            all_chunks.append(chunk)
 
     # 批量写 SQLite symbols
     await _bulk_insert_symbols(db, symbol_rows)
@@ -582,13 +595,12 @@ async def _update_status(db, repo_id: str, status: int, message: str) -> None:
 
 async def _log(db, repo_id: str, level: str, message: str) -> None:
     """
-    只插入日志，不立即 commit（由调用方控制 commit 时机）。
-    WARNING/ERROR 级别立即 commit，INFO 随下次批量写一起落盘，
-    减少锁竞争。
+    立即 commit 写入日志。
+    旧实现对 INFO 不 commit、等下次写一起落盘，会导致前端轮询 /index/logs
+    长时间看不到进度。WAL 模式下小事务的开销已经很低，不再延迟。
     """
     await db.execute(
         "INSERT INTO index_logs(repo_id, level, message) VALUES (?,?,?)",
         (repo_id, level, message),
     )
-    if level in ("WARNING", "ERROR"):
-        await db.commit()
+    await db.commit()

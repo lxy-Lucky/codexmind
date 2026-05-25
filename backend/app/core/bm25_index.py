@@ -23,18 +23,35 @@ logger = logging.getLogger(__name__)
 
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
+# parser_service 写进 chunk.text 的结构化标签：[FILE] / [CLASS] / [METHOD] / [SIGNATURE]
+# / [ANNOTATIONS] / [CALLS] / [COMMENT]。
+# 这些 token 出现在每个文档里，IDF 极低，但仍占 corpus 长度、稀释真实词权重。
+# tokenize 前先剥掉，保留它们的值。
+_STRUCT_TAG_RE = re.compile(
+    r"\[(?:FILE|CLASS|METHOD|SIGNATURE|ANNOTATIONS|CALLS|COMMENT)\]"
+)
+
+# 标签字段名本身（去掉方括号后）也不应作为 BM25 词进入 corpus
+_STRUCT_STOPWORDS = {
+    "file", "class", "method", "signature", "annotations", "calls", "comment",
+}
+
 
 def _tokenize(text: str) -> list[str]:
     """
     标识符感知 tokenization：
-      1. 保留原始标识符（processPayment → processpayment，用于精确查询）
-      2. 驼峰拆分  processPayment → process payment
-      3. 下划线拆分 get_order_id  → get order id
-      4. 小写 + 去停用词（长度 < 2 的 token）
+      1. 剥离 [FILE]/[CLASS]/... 标签本身（仅保留值）
+      2. 保留原始标识符（processPayment → processpayment，用于精确查询）
+      3. 驼峰拆分  processPayment → process payment
+      4. 下划线拆分 get_order_id  → get order id
+      5. 小写 + 去停用词（长度 < 2 的 token；结构标签词）
     """
-    # 先提取原始标识符，保持整词（用于精确匹配）
+    # 1) 剥离结构标签本身
+    text = _STRUCT_TAG_RE.sub(" ", text)
+
+    # 2) 提取原始标识符，保持整词（用于精确匹配）
     raw_idents = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]+', text)
-    # 驼峰拆分
+    # 3) 驼峰拆分
     split_text = _CAMEL_RE.sub(" ", text)
     # 非字母数字 → 空格
     split_text = re.sub(r"[^a-zA-Z0-9]", " ", split_text)
@@ -43,7 +60,7 @@ def _tokenize(text: str) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for t in [i.lower() for i in raw_idents] + split_tokens:
-        if t not in seen and len(t) >= 2:
+        if t not in seen and len(t) >= 2 and t not in _STRUCT_STOPWORDS:
             seen.add(t)
             result.append(t)
     return result

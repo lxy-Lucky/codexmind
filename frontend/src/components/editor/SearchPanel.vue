@@ -1,55 +1,37 @@
 <script setup lang="ts">
 import { useSearchStore } from '@/stores/searchStore'
 import { useRepoStore }   from '@/stores/repoStore'
-import type { SearchMode } from '@/types'
 
 const emit   = defineEmits<{ (e: 'searched'): void }>()
 const search = useSearchStore()
 const repo   = useRepoStore()
 
-type Tab = { id: SearchMode; label: string; color: string; dot: string }
-const tabs: Tab[] = [
-  { id: 'semantic', label: '语义检索', color: 'text-cyan',       dot: 'bg-cyan' },
-  { id: 'bug',      label: 'Bug 定位', color: 'text-red-accent', dot: 'bg-red-accent' },
-  { id: 'explain',  label: '逻辑解释', color: 'text-amber',      dot: 'bg-amber' },
-  { id: 'deps',     label: '依赖分析', color: 'text-purple',     dot: 'bg-purple' },
+// 语言过滤选项：UI label → indexer 写入 payload.language 时实际使用的值
+// （由 EXT_TO_LANG 决定：.java→java，.js/.jsx→javascript，.xml→xml）
+const LANG_FILTERS: { label: string; value: string }[] = [
+  { label: 'JS',   value: 'javascript' },
+  { label: 'Java', value: 'java'       },
+  { label: 'XML',  value: 'xml'        },
 ]
-
-const HINTS: Record<SearchMode, string[]> = {
-  semantic: ['用户登录在哪实现', '字符串判空方法', 'JWT Token 生成'],
-  bug:      ['空指针隐患', '未关闭资源', 'SQL 注入风险'],
-  explain:  ['订单状态流转', '分页查询逻辑', '权限校验流程'],
-  deps:     ['AuthController 依赖', 'UserService 调用链'],
-}
 
 async function submit() {
   if (!repo.isIndexDone || !search.query.trim() || search.loading) return
   await search.doSearch()
-  // 搜索完成后通知父组件切换到搜索结果视图
   emit('searched')
 }
 
-function fillHint(hint: string) {
-  search.query = hint
+function toggleLang(value: string) {
+  // 单选：再点一次即取消
+  search.languageFilter = search.languageFilter === value ? null : value
 }
 </script>
 
 <template>
   <div class="search-panel">
-    <!-- Mode tabs -->
-    <div class="flex gap-0.5 mb-3 bg-bg-surface rounded-lg p-0.5 w-fit">
-      <button
-        v-for="tab in tabs"
-        :key="tab.id"
-        class="mode-tab"
-        :class="search.mode === tab.id
-          ? ['bg-bg-elevated shadow-sm', tab.color]
-          : 'text-text-muted hover:text-text-secondary'"
-        @click="search.mode = tab.id"
-      >
-        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="tab.dot" />
-        {{ tab.label }}
-      </button>
+    <!-- 模式标识：只剩语义检索一种 -->
+    <div class="flex items-center gap-1.5 mb-3 font-mono text-[11px] font-medium text-cyan">
+      <span class="w-1.5 h-1.5 rounded-full bg-cyan" />
+      语义检索
     </div>
 
     <!-- Input + button row -->
@@ -57,7 +39,7 @@ function fillHint(hint: string) {
       <div class="flex-1">
         <textarea
           v-model="search.query"
-          :placeholder="`输入 ${tabs.find(t => t.id === search.mode)?.label} 问题...`"
+          placeholder="输入要检索的内容..."
           rows="1"
           class="w-full bg-bg-surface border border-border-dim rounded-lg px-4 py-3
                  font-mono text-[13px] text-text-primary placeholder-text-muted outline-none
@@ -65,18 +47,24 @@ function fillHint(hint: string) {
                  focus:border-cyan focus:shadow-[0_0_0_3px_rgba(0,212,255,0.12)]"
           @keydown.enter.exact.prevent="submit"
         />
-        <!-- Hint chips -->
-        <div class="flex gap-1.5 mt-2 flex-wrap">
+        <!-- 语言过滤：单选；选中后只返回该语言的文件 -->
+        <div class="flex items-center gap-2 mt-2">
+          <span class="font-mono text-[10px] text-text-muted">仅检索：</span>
           <button
-            v-for="hint in HINTS[search.mode]"
-            :key="hint"
-            class="font-mono text-[10px] px-2.5 py-1 rounded-full border border-border-dim
-                   bg-bg-surface text-text-muted hover:border-cyan hover:text-cyan
-                   hover:bg-cyan-dim transition-all"
-            @click="fillHint(hint)"
+            v-for="opt in LANG_FILTERS"
+            :key="opt.value"
+            class="lang-chip font-mono text-[10px] px-2.5 py-1 rounded-full border transition-all"
+            :class="search.languageFilter === opt.value
+              ? 'border-cyan text-cyan bg-cyan-dim'
+              : 'border-border-dim bg-bg-surface text-text-muted hover:border-cyan hover:text-cyan'"
+            @click="toggleLang(opt.value)"
           >
-            {{ hint }}
+            {{ opt.label }}
           </button>
+          <span v-if="search.languageFilter"
+                class="font-mono text-[10px] text-text-muted ml-1">
+            （再点取消）
+          </span>
         </div>
       </div>
 
@@ -112,8 +100,8 @@ function fillHint(hint: string) {
 .search-panel {
   @apply px-6 py-4 border-b border-border-dim bg-bg-base flex-shrink-0;
 }
-.mode-tab {
-  @apply flex items-center gap-1.5 font-mono text-[11px] font-medium
-         px-3.5 py-1.5 rounded transition-all;
+.lang-chip {
+  min-width: 44px;
+  text-align: center;
 }
 </style>

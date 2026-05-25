@@ -8,6 +8,8 @@ export const useSearchStore = defineStore('search', () => {
   // ── State ──────────────────────────────────────────────────────────────────
   const query        = ref('')
   const mode         = ref<SearchMode>('semantic')
+  // 语言过滤：null=全部；选中 'java'/'javascript'/'xml' 时仅返回该 language 的 chunk
+  const languageFilter = ref<string | null>(null)
   const results      = ref<SearchResultItem[]>([])
   const history      = ref<QueryHistory[]>([])
   const loading      = ref(false)
@@ -29,8 +31,9 @@ export const useSearchStore = defineStore('search', () => {
       const res = await searchApi.search({
         query:   query.value,
         repo_id: repoStore.currentRepo.id,
-        mode:    mode.value === 'semantic' ? 'semantic' : mode.value,
+        mode:    'semantic',
         top_k:   20,
+        language_filter: languageFilter.value ?? undefined,
       })
       results.value  = res.results
       latencyMs.value = res.latency_ms
@@ -63,7 +66,7 @@ export const useSearchStore = defineStore('search', () => {
   }
 
   return {
-    query, mode, results, history, loading, latencyMs, error, hasSearched,
+    query, mode, languageFilter, results, history, loading, latencyMs, error, hasSearched,
     doSearch, fetchHistory, deleteHistory, clearResults,
   }
 })

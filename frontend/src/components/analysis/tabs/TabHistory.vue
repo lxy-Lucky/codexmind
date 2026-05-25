@@ -17,8 +17,8 @@ const MODE_COLOR: Record<string, string> = {
 }
 
 function rerun(h: QueryHistory) {
+  // 现在只剩"语义检索"一种模式，直接复用 query 即可
   search.query = h.query
-  search.mode  = h.mode as any
   search.doSearch()
 }
 

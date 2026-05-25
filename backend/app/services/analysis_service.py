@@ -26,7 +26,27 @@ logger = logging.getLogger(__name__)
 
 # ── 调用链 Context 构建 ────────────────────────────────────────────────────────
 
-async def _build_call_context(symbol_id: str, repo_id: str) -> str:
+# 调用链段落的多语言文案
+_CALL_CONTEXT_LABELS = {
+    "zh": {
+        "title":   "\n### 调用链上下文",
+        "callers": "**调用者（谁调用了此方法）：**",
+        "callees": "**被调用者（此方法调用了谁）：**",
+    },
+    "ja": {
+        "title":   "\n### 呼び出し関係",
+        "callers": "**呼び出し元（このメソッドを呼ぶ）：**",
+        "callees": "**呼び出し先（このメソッドが呼ぶ）：**",
+    },
+    "en": {
+        "title":   "\n### Call chain context",
+        "callers": "**Callers (who calls this method):**",
+        "callees": "**Callees (what this method calls):**",
+    },
+}
+
+
+async def _build_call_context(symbol_id: str, repo_id: str, locale: str = "en") -> str:
     """
     从 Neo4j 拉取 1-hop 调用链，构造自然语言摘要注入 prompt。
     无 symbol_id 时返回空字符串（不阻断分析）。
@@ -59,18 +79,19 @@ async def _build_call_context(symbol_id: str, repo_id: str) -> str:
         return ""
 
     row = rows[0]
-    lines = ["\n### 调用链上下文"]
+    labels = _CALL_CONTEXT_LABELS.get(locale, _CALL_CONTEXT_LABELS["en"])
+    lines = [labels["title"]]
 
     callers = [c for c in (row.get("callers") or []) if c.get("name")]
     callees = [c for c in (row.get("callees") or []) if c.get("name")]
 
     if callers:
-        lines.append("**调用者（谁调用了此方法）：**")
+        lines.append(labels["callers"])
         for c in callers:
             lines.append(f"- `{c.get('class','')}.{c['name']}` — {c.get('file','')}")
 
     if callees:
-        lines.append("**被调用者（此方法调用了谁）：**")
+        lines.append(labels["callees"])
         for c in callees:
             sig = c.get("sig") or c.get("name")
             lines.append(f"- `{c.get('class','')}.{c['name']}` → {sig[:80] if sig else ''}")
@@ -80,10 +101,12 @@ async def _build_call_context(symbol_id: str, repo_id: str) -> str:
 
 # ── Prompt 模板 ───────────────────────────────────────────────────────────────
 
-_PROMPTS = {
-    "summary": """\
+# 多语言 prompt 模板。LLM 会按 locale 用对应语言回复。
+_PROMPTS_BY_LOCALE: dict[str, dict[str, str]] = {
+    "zh": {
+        "summary": """\
 你是一位资深软件架构师，精通 Java、Python、Go 等主流语言。
-请对以下代码进行语义分析，用**中文**输出，使用 Markdown 格式：
+请对以下代码进行语义分析，**必须用中文回答**，使用 Markdown 格式：
 
 ## 功能概述
 （1-2 句话说明该代码段的核心职责）
@@ -106,9 +129,8 @@ _PROMPTS = {
 {code}
 ```
 """,
-
-    "bug": """\
-你是一位代码安全与质量审查专家。
+        "bug": """\
+你是一位代码安全与质量审查专家。**所有自然语言字段必须用中文。**
 分析以下代码（含调用链上下文），找出所有潜在问题，重点关注：
 - 空指针 / 未校验的入参
 - 调用者传入的危险参数
@@ -137,8 +159,7 @@ _PROMPTS = {
 {code}
 ```
 """,
-
-    "deps": """\
+        "deps": """\
 你是一位架构分析专家。分析以下代码的调用链和依赖关系，输出 **Mermaid flowchart LR** 格式。
 
 要求：
@@ -152,10 +173,9 @@ _PROMPTS = {
 {code}
 ```
 """,
-
-    "custom_system": """\
+        "custom_system": """\
 你是一位专业的代码助手，擅长分析、解释、优化各类编程语言的代码。
-请根据用户的问题，结合以下代码上下文进行回答，用**中文**输出，支持 Markdown 格式。
+请根据用户的问题，结合以下代码上下文进行回答，**必须用中文回答**，支持 Markdown 格式。
 
 文件：`{file_path}`（第 {line_start}-{line_end} 行）
 
@@ -165,7 +185,180 @@ _PROMPTS = {
 {code}
 ```
 """,
+    },
+
+    "ja": {
+        "summary": """\
+あなたはベテランのソフトウェアアーキテクトで、Java、Python、Go などの主要言語に精通しています。
+以下のコードをセマンティック分析し、**必ず日本語で回答**してください。Markdown 形式で出力します。
+
+## 機能概要
+（このコードセグメントの中核となる責任を 1〜2 文で）
+
+## 全体フロー内での位置付け
+（呼び出し関係を踏まえ、このメソッドがビジネスフロー内で果たす役割）
+
+## 主要処理フロー
+（実行ロジックをステップごとに説明）
+
+## 重要な設計判断
+（デザインパターン、境界条件、注目すべき点）
+
+---
+ファイル：`{file_path}`（{line_start}-{line_end} 行）
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+        "bug": """\
+あなたはコードのセキュリティと品質のレビュー専門家です。**自然言語フィールドは必ず日本語で記述してください。**
+以下のコード（呼び出し関係を含む）を分析し、潜在的な問題をすべて検出します。特に注意：
+- NULL 参照 / 未検証の引数
+- 呼び出し元から渡される危険なパラメータ
+- 被呼び出しメソッドの未処理例外
+- リソースリーク、トランザクション境界、並行性の問題
+
+**JSON 配列のみを厳密に出力**してください。他のテキストや markdown 囲みは禁止：
+
+[
+  {{
+    "severity": "Critical|Warning|Suggestion",
+    "line": 行番号 または null,
+    "title": "問題タイトル（20 文字以内）",
+    "desc": "詳細説明",
+    "suggestion": "修正の提案",
+    "code_ref": "問題のコード片（任意）"
+  }}
+]
+
+---
+ファイル：`{file_path}`（{line_start}-{line_end} 行）
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+        "deps": """\
+あなたはアーキテクチャ分析の専門家です。以下のコードの呼び出し関係と依存関係を分析し、**Mermaid flowchart LR** 形式で出力してください。
+
+要件：
+- メソッド呼び出し関係を含める（A --> B）
+- 外部依存はシェイプで区別（DB はシリンダー [( )]、HTTP はひし形 {{ }}）
+- mermaid コードブロックのみを出力し、他のテキストは出力しない
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+        "custom_system": """\
+あなたはプロのコードアシスタントで、さまざまなプログラミング言語のコードを分析・解説・最適化することが得意です。
+ユーザーの質問に対し、以下のコードコンテキストを踏まえて回答してください。**必ず日本語で回答**し、Markdown 形式に対応します。
+
+ファイル：`{file_path}`（{line_start}-{line_end} 行）
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+    },
+
+    "en": {
+        "summary": """\
+You are a senior software architect proficient in Java, Python, Go, and other mainstream languages.
+Perform a semantic analysis of the code below. **Always respond in English** using Markdown:
+
+## Overview
+(1-2 sentences describing the core responsibility of this snippet)
+
+## Position in the overall flow
+(Using the call-chain context, describe this method's role in the business flow)
+
+## Core logic
+(Walk through the execution step-by-step)
+
+## Key design decisions
+(Design patterns, edge cases, things worth noting)
+
+---
+File: `{file_path}` (lines {line_start}-{line_end})
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+        "bug": """\
+You are a code security and quality reviewer. **All natural-language fields must be in English.**
+Analyze the following code (with call-chain context) and find every potential issue. Focus on:
+- Null references / unvalidated inputs
+- Dangerous parameters from callers
+- Unhandled exceptions in callees
+- Resource leaks, transaction boundaries, concurrency
+
+**Output strictly a single JSON array** — no extra text, no markdown fence:
+
+[
+  {{
+    "severity": "Critical|Warning|Suggestion",
+    "line": line_number or null,
+    "title": "Short title (within 20 chars)",
+    "desc": "Detailed description",
+    "suggestion": "How to fix",
+    "code_ref": "Problematic snippet (optional)"
+  }}
+]
+
+---
+File: `{file_path}` (lines {line_start}-{line_end})
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+        "deps": """\
+You are an architecture analyst. Analyze the call chain and dependencies of the code below and output a **Mermaid flowchart LR**.
+
+Requirements:
+- Include method-to-method calls (A --> B)
+- Distinguish external dependencies by shape (DB as cylinder [( )], HTTP as rhombus {{ }})
+- Output only the mermaid code block, nothing else
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+        "custom_system": """\
+You are a professional code assistant skilled at analyzing, explaining, and optimizing code in any language.
+Answer the user's question using the code context below. **Always respond in English** and support Markdown.
+
+File: `{file_path}` (lines {line_start}-{line_end})
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+    },
 }
+
+
+def _get_prompts(locale: str) -> dict[str, str]:
+    return _PROMPTS_BY_LOCALE.get(locale, _PROMPTS_BY_LOCALE["en"])
 
 
 def _ext_to_lang(file_path: str) -> str:
@@ -178,8 +371,9 @@ def _ext_to_lang(file_path: str) -> str:
     }.get(ext, ext)
 
 
-def _build_prompt(req: AnalysisRequest, call_context: str) -> str:
-    template = _PROMPTS.get(req.mode, _PROMPTS["summary"])
+def _build_prompt(req: AnalysisRequest, call_context: str, locale: str = "en") -> str:
+    prompts = _get_prompts(locale)
+    template = prompts.get(req.mode, prompts["summary"])
     language = _ext_to_lang(req.file_path)
     return template.format(
         file_path    = req.file_path,
@@ -195,9 +389,11 @@ def _build_chat_messages(
     req: AnalysisRequest,
     history: list[ChatMessage],
     call_context: str,
+    locale: str = "en",
 ) -> list[dict]:
+    prompts = _get_prompts(locale)
     language = _ext_to_lang(req.file_path)
-    system_content = _PROMPTS["custom_system"].format(
+    system_content = prompts["custom_system"].format(
         file_path    = req.file_path,
         line_start   = req.line_start,
         line_end     = req.line_end,
@@ -217,6 +413,7 @@ def _build_chat_messages(
 async def stream_analysis(
     req: AnalysisRequest,
     history: list[ChatMessage] | None = None,
+    locale: str = "en",
 ) -> AsyncIterator[str]:
     """
     yield SSE 事件：
@@ -230,16 +427,16 @@ async def stream_analysis(
     call_context = ""
     try:
         call_context = await _build_call_context(
-            req.symbol_id or "", req.repo_id
+            req.symbol_id or "", req.repo_id, locale
         )
     except Exception as e:
         logger.warning("Call context fetch failed: %s", e)
 
     # 构造 messages
     if req.mode == "custom":
-        messages = _build_chat_messages(req, history or [], call_context)
+        messages = _build_chat_messages(req, history or [], call_context, locale)
     else:
-        messages = [{"role": "user", "content": _build_prompt(req, call_context)}]
+        messages = [{"role": "user", "content": _build_prompt(req, call_context, locale)}]
 
     try:
         client = ollama.AsyncClient(host=settings.OLLAMA_HOST)

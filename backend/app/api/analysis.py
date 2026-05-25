@@ -48,7 +48,7 @@ async def analyze_stream(
         raise HTTPException(400, t("analyze.custom_prompt_required", locale))
 
     return StreamingResponse(
-        stream_analysis(req, history),
+        stream_analysis(req, history, locale=locale),
         media_type="text/event-stream",
         headers={
             "Cache-Control":               "no-cache",

@@ -61,10 +61,6 @@ function toggleLang(value: string) {
           >
             {{ opt.label }}
           </button>
-          <span v-if="search.languageFilter"
-                class="font-mono text-[10px] text-text-muted ml-1">
-            （再点取消）
-          </span>
         </div>
       </div>
 

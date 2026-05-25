@@ -522,8 +522,9 @@ async def semantic_search(req: SearchRequest, db: aiosqlite.Connection) -> Searc
 
     intent = QueryIntent(req.query)
     fetch_k = max(req.top_k * 10, 100)
-    logger.info("Search [%s] '%s' lang=%s intent=%s",
-                req.repo_id, req.query, intent.lang, intent.intent)
+    logger.info("Search [%s] '%s' lang=%s intent=%s language_filter=%s",
+                req.repo_id, req.query, intent.lang, intent.intent,
+                req.language_filter or "<none>")
 
     # ── collection 存在性检查 ────────────────────────────────────────────────
     col = collection_name(req.repo_id)
@@ -563,6 +564,9 @@ async def semantic_search(req: SearchRequest, db: aiosqlite.Connection) -> Searc
     (dense_results, dense_payloads), (sparse_results, sparse_payloads) = await asyncio.gather(
         dense_task, sparse_task
     )
+    logger.info("Search hits: dense=%d sparse=%d (filter=%s)",
+                len(dense_results), len(sparse_results),
+                req.language_filter or "<none>")
 
     # HyDE：用假想代码 embed 再跑一路 dense
     extra_dense: list[tuple[str, float]] = []

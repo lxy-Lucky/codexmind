@@ -1,6 +1,6 @@
 <template>
   <div class="tab-deps">
-    <!-- 工具栏 -->
+    <!-- 工具栏（保留视图切换 + 图例） -->
     <div class="deps-toolbar">
       <div class="view-select-wrap">
         <select
@@ -12,13 +12,6 @@
         </select>
         <span class="view-select-arrow">▾</span>
       </div>
-      <div class="depth-control" v-if="activeView !== 'class'">
-        <span class="depth-label">深度</span>
-        <button @click="changeDepth(-1)" :disabled="depth <= 1">−</button>
-        <span class="depth-val">{{ depth }}</span>
-        <button @click="changeDepth(1)" :disabled="depth >= 5">+</button>
-      </div>
-      <button class="recenter-btn" @click="fitToView" title="重置视图">⤢ 重置视图</button>
       <div class="legend">
         <span class="dot controller">Controller</span>
         <span class="dot service">Service</span>
@@ -34,6 +27,17 @@
         <span>选中代码行后，调用图将在此显示</span>
       </div>
       <div class="graph-loading" v-if="loading">加载中…</div>
+
+      <!-- 浮动控件：深度调节 + 重置视图（右下角） -->
+      <div class="floating-controls" v-if="!isEmpty">
+        <div class="depth-control" v-if="activeView !== 'class'">
+          <span class="depth-label">深度</span>
+          <button @click="changeDepth(-1)" :disabled="depth <= 1">−</button>
+          <span class="depth-val">{{ depth }}</span>
+          <button @click="changeDepth(1)" :disabled="depth >= 5">+</button>
+        </div>
+        <button class="recenter-btn" @click="fitToView" title="重置视图">⤢ 重置</button>
+      </div>
     </div>
 
     <!-- 节点详情浮层 -->
@@ -415,6 +419,25 @@ onUnmounted(() => { simulation?.stop() })
   line-height: 1;
 }
 
+/* 浮动控件容器：贴在图右下角，半透明背景，悬停时更明显 */
+.floating-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  z-index: 10;
+  opacity: 0.65;
+  transition: opacity 0.15s ease;
+}
+.floating-controls:hover { opacity: 1; }
+
 .depth-control {
   display: flex;
   align-items: center;
@@ -442,6 +465,7 @@ onUnmounted(() => { simulation?.stop() })
   color: var(--text-secondary, #94a3b8);
   font-size: 11px;
   cursor: pointer;
+  white-space: nowrap;
 }
 .recenter-btn:hover {
   color: #fff;

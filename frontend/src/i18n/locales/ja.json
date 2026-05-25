@@ -1,0 +1,188 @@
+{
+  "app": {
+    "title": "CodexMind"
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "キャンセル",
+    "confirm": "確認",
+    "save": "保存",
+    "delete": "削除",
+    "search": "検索",
+    "loading": "読み込み中…",
+    "empty": "データがありません",
+    "stop": "停止",
+    "clear": "クリア",
+    "online": "オンライン",
+    "offline": "オフライン",
+    "done": "完了"
+  },
+  "language": {
+    "label": "言語",
+    "zh": "中文",
+    "ja": "日本語",
+    "en": "English"
+  },
+  "nav": {
+    "section": "リポジトリ",
+    "expand": "展開",
+    "collapse": "折りたたむ",
+    "explorer": "ファイル",
+    "search": "検索結果",
+    "bug": "Bug スキャン",
+    "history": "履歴",
+    "semantic": "セマンティック検索"
+  },
+  "topbar": {
+    "indexOnline": "ベクトルインデックス：オンライン",
+    "backendOffline": "バックエンドオフライン"
+  },
+  "statusbar": {
+    "vectorIndex": "ベクトルインデックス",
+    "contextWindow": "コンテキストウィンドウ",
+    "searchLatency": "検索時間",
+    "analysisLatency": "分析時間",
+    "confidence": "信頼度"
+  },
+  "repo": {
+    "addRepo": "リポジトリ追加",
+    "addRepoConfirm": "追加を確認",
+    "adding": "追加中…",
+    "deleteRepo": "リポジトリ削除",
+    "index": "インデックス",
+    "indexing": "…",
+    "fileSuffix": "ファイル",
+    "skipPrefix": "{n} 個のディレクトリをスキップ",
+    "noRepo": "先にリポジトリを追加してください",
+    "treeLoading": "ファイルツリーを読み込み中…",
+    "openBugPanel": "Bug 検出パネルを開く",
+    "bugTip": "ファイルを選択してから「Bug」ボタンで分析します。",
+    "status": {
+      "notIndexed": "未インデックス",
+      "indexing": "インデックス中…",
+      "ready": "準備完了",
+      "failed": "失敗"
+    },
+    "form": {
+      "namePlaceholder": "リポジトリ名",
+      "pathPlaceholder": "C:\\Users\\...\\my-project",
+      "skipPlaceholder": "スキップディレクトリ（任意、1 行 1 件またはカンマ区切り）\n例：\nView\nWEB-INF/src/Property\nWEB-INF/sheet"
+    }
+  },
+  "search": {
+    "title": "セマンティック検索",
+    "placeholder": "検索内容を入力…",
+    "onlyLang": "対象のみ：",
+    "searching": "検索中…",
+    "submit": "検索",
+    "warnNotIndexed": "リポジトリ未インデックス。左側の「インデックス作成」をクリックしてください",
+    "warnSelectRepo": "先に左側でリポジトリを追加して選択してください"
+  },
+  "searchResults": {
+    "noMatch": "該当するコードが見つかりません。別の表現で試してください",
+    "matchCount": "{n} 件ヒット",
+    "lineSuffix": "{n} 行",
+    "collapse": "▲ 折りたたむ",
+    "expandAll": "▼ 全て展開 ({n} 行)",
+    "snippetEmpty": "インデックスを再実行するとコード片を表示できます",
+    "openFile": "ファイルを開く",
+    "aiAnalyze": "AI 分析",
+    "initialHint": "上部に自然言語クエリを入力してください"
+  },
+  "toolbar": {
+    "copyPath": "パスをコピー",
+    "noFile": "ファイル未オープン",
+    "lineSuffix": "{n} 行",
+    "summaryTitle": "コード解説",
+    "summaryShort": "解説",
+    "bugTitle": "Bug 検出",
+    "bugShort": "Bug",
+    "depsTitle": "依存分析",
+    "depsShort": "依存"
+  },
+  "editor": {
+    "emptyPrimary": "左側のファイルツリーからファイルを選択",
+    "emptySecondary": "またはセマンティック検索でコードを探す",
+    "loading": "読み込み中…"
+  },
+  "analysis": {
+    "engineTitle": "AI 分析エンジン",
+    "tabs": {
+      "summary": "コード解説",
+      "bug": "Bug",
+      "deps": "依存グラフ",
+      "history": "履歴",
+      "chat": "Q&A"
+    }
+  },
+  "summary": {
+    "title": "AI セマンティック分析",
+    "generating": "生成中…",
+    "confidence": "分析信頼度",
+    "callChainTitle": "呼び出し関係",
+    "callers": "▲ 呼び出し元（このメソッドを呼ぶ）",
+    "callees": "▼ 呼び出し先（このメソッドが呼ぶ）",
+    "empty": "コードを選択してから「解説」ボタンをクリック"
+  },
+  "bug": {
+    "detecting": "Bug 検出中…",
+    "detectedCount": "{n} 件の問題を検出",
+    "suggestion": "提案：",
+    "empty": "コードを選択してから「Bug」ボタンをクリック",
+    "parseFailed": "Bug 検出結果のパース失敗"
+  },
+  "chat": {
+    "contextLabel": "コンテキスト",
+    "callChainLabel": "呼び出し関係",
+    "contextInjected": "AI コンテキストに注入済み",
+    "emptyTitle": "コード選択後、そのまま質問できます",
+    "emptyHint": "呼び出し関係のコンテキストは自動注入されます",
+    "clear": "対話をクリア",
+    "questionCount": "{n} 件の質問",
+    "inputPlaceholder": "質問を入力…（Enter で送信 / Shift+Enter で改行）",
+    "hotkeyHint": "Enter で送信 · Shift+Enter で改行",
+    "charCount": "{n} 字",
+    "requestFailed": "リクエスト失敗：{msg}"
+  },
+  "history": {
+    "recent": "直近 {n} 件のクエリ",
+    "empty": "履歴がありません",
+    "resultsSuffix": "{n} 件",
+    "rerun": "再実行",
+    "modes": {
+      "semantic": "セマンティック",
+      "bug": "Bug",
+      "explain": "解説",
+      "deps": "依存"
+    }
+  },
+  "deps": {
+    "views": {
+      "method": "メソッド呼び出し図",
+      "class": "クラス依存図",
+      "impact": "影響範囲"
+    },
+    "legend": {
+      "controller": "Controller",
+      "service": "Service",
+      "dao": "DAO/Mapper",
+      "sql": "SQL",
+      "util": "Util/Other"
+    },
+    "empty": "コード行を選択すると呼び出し図がここに表示されます",
+    "loading": "読み込み中…",
+    "depth": "深さ",
+    "reset": "⤢ リセット",
+    "resetTitle": "ビューをリセット",
+    "tooltipMeta": "PageRank: {pr} · 被呼び出し: {in}",
+    "impactSummary": "{n} 個のメソッドが影響を受けます（{d} ホップ以内）"
+  },
+  "errors": {
+    "requestFailed": "リクエスト失敗",
+    "analyzeFailed": "分析リクエスト失敗",
+    "connectionLost": "接続が切断されました",
+    "noFileOpen": "先にファイルを開いてください",
+    "noFileOrSelection": "先にファイルを開くか、コードを選択してください",
+    "noCodeSelected": "// コード未選択"
+  }
+}

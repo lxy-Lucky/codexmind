@@ -11,6 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.core.config import settings
+from app.core.i18n import get_locale, t
 from app.core.qdrant_client import delete_collection, collection_info
 from app.core.neo4j_client import run_query, run_write
 from app.db.database import get_db
@@ -42,11 +43,12 @@ logger = logging.getLogger(__name__)
 async def register_repo(
     body: RepoRegisterRequest,
     db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
 ):
     root = Path(body.root_path)
 
     if not settings.is_path_allowed(root):
-        raise HTTPException(403, "该路径不在允许的白名单内")
+        raise HTTPException(403, t("repo.path_not_allowed", locale))
 
     repo_id   = make_repo_id(body.root_path)
     language  = detect_primary_language(root)
@@ -88,23 +90,31 @@ async def list_repos(db: aiosqlite.Connection = Depends(get_db)):
 # ── 仓库详情 ──────────────────────────────────────────────────────────────────
 
 @router.get("/{repo_id}", response_model=RepoResponse)
-async def get_repo(repo_id: str, db: aiosqlite.Connection = Depends(get_db)):
+async def get_repo(
+    repo_id: str,
+    db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
+):
     row = await _fetch_repo(db, repo_id)
     if not row:
-        raise HTTPException(404, "仓库不存在")
+        raise HTTPException(404, t("repo.not_found", locale))
     return _row_to_response(row)
 
 
 # ── 删除仓库 ──────────────────────────────────────────────────────────────────
 
 @router.delete("/{repo_id}", status_code=204)
-async def delete_repo(repo_id: str, db: aiosqlite.Connection = Depends(get_db)):
+async def delete_repo(
+    repo_id: str,
+    db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
+):
     row = await _fetch_repo(db, repo_id)
     if not row:
-        raise HTTPException(404, "仓库不存在")
+        raise HTTPException(404, t("repo.not_found", locale))
     if dict(row)["indexed"] == 1:
         # 索引正在跑，删除会和后台任务 race
-        raise HTTPException(409, "索引进行中，无法删除")
+        raise HTTPException(409, t("repo.index_running_cannot_delete", locale))
 
     # Qdrant collection
     try:
@@ -151,12 +161,13 @@ async def trigger_index(
     repo_id: str,
     background_tasks: BackgroundTasks,
     db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
 ):
     row = await _fetch_repo(db, repo_id)
     if not row:
-        raise HTTPException(404, "仓库不存在")
+        raise HTTPException(404, t("repo.not_found", locale))
     if dict(row)["indexed"] == 1:
-        raise HTTPException(409, "索引任务已在运行中")
+        raise HTTPException(409, t("repo.index_already_running", locale))
 
     d = dict(row)
     extra_skip = frozenset(json.loads(d.get("skip_dirs") or "[]"))
@@ -168,22 +179,26 @@ async def trigger_index(
     return IndexProgressResponse(
         repo_id     = repo_id,
         status      = IndexStatus.RUNNING,
-        message     = "索引任务已启动",
+        message     = t("repo.index_started", locale),
         chunk_count = 0,
         file_count  = dict(row)["file_count"],
     )
 
 
 @router.get("/{repo_id}/index/status", response_model=IndexProgressResponse)
-async def index_status(repo_id: str, db: aiosqlite.Connection = Depends(get_db)):
+async def index_status(
+    repo_id: str,
+    db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
+):
     row = await _fetch_repo(db, repo_id)
     if not row:
-        raise HTTPException(404, "仓库不存在")
+        raise HTTPException(404, t("repo.not_found", locale))
     d = dict(row)
     return IndexProgressResponse(
         repo_id     = repo_id,
         status      = IndexStatus(d["indexed"]),
-        message     = _status_message(d["indexed"]),
+        message     = _status_message(d["indexed"], locale),
         chunk_count = d["chunk_count"],
         file_count  = d["file_count"],
     )
@@ -195,10 +210,11 @@ async def index_status(repo_id: str, db: aiosqlite.Connection = Depends(get_db))
 async def get_file_tree(
     repo_id: str,
     db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
 ):
     row = await _fetch_repo(db, repo_id)
     if not row:
-        raise HTTPException(404, "仓库不存在")
+        raise HTTPException(404, t("repo.not_found", locale))
     d = dict(row)
     root = Path(d["root_path"])
     extra = frozenset(json.loads(d.get("skip_dirs") or "[]"))
@@ -213,10 +229,11 @@ async def get_file_content(
     repo_id: str,
     path: str = Query(..., description="相对于 repo root 的路径"),
     db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
 ):
     row = await _fetch_repo(db, repo_id)
     if not row:
-        raise HTTPException(404, "仓库不存在")
+        raise HTTPException(404, t("repo.not_found", locale))
     root = Path(dict(row)["root_path"])
     try:
         return await read_file_content(root, path)
@@ -266,7 +283,11 @@ async def symbol_at_line(
 # ── 索引日志 ──────────────────────────────────────────────────────────────────
 
 @router.get("/{repo_id}/index/stats", summary="索引统计（按 language / chunk_type 分组）")
-async def index_stats(repo_id: str, db: aiosqlite.Connection = Depends(get_db)):
+async def index_stats(
+    repo_id: str,
+    db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
+):
     """
     诊断用：返回该 repo 在 Qdrant / Neo4j / SQLite 中的分布情况。
     便于排查"为什么搜不到某种类型的文件"——比如 XML mapper 没建索引时
@@ -274,7 +295,7 @@ async def index_stats(repo_id: str, db: aiosqlite.Connection = Depends(get_db)):
     """
     row = await _fetch_repo(db, repo_id)
     if not row:
-        raise HTTPException(404, "仓库不存在")
+        raise HTTPException(404, t("repo.not_found", locale))
 
     stats: dict[str, Any] = {"repo_id": repo_id}
 
@@ -384,13 +405,14 @@ def _row_to_response(row) -> RepoResponse:
     )
 
 
-def _status_message(status: int) -> str:
-    return {
-        0: "尚未索引",
-        1: "索引进行中...",
-        2: "索引完成",
-        3: "索引失败",
-    }.get(status, "未知状态")
+def _status_message(status: int, locale: str = "en") -> str:
+    key = {
+        0: "repo.status.not_indexed",
+        1: "repo.status.running",
+        2: "repo.status.done",
+        3: "repo.status.failed",
+    }.get(status, "repo.status.unknown")
+    return t(key, locale)
 
 
 async def _run_index_bg(

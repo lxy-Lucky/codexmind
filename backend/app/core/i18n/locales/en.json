@@ -1,0 +1,37 @@
+{
+  "common": {
+    "ok": "OK",
+    "not_found": "Not found",
+    "internal_error": "Internal server error",
+    "bad_request": "Bad request"
+  },
+  "repo": {
+    "not_found": "Repository not found",
+    "path_not_allowed": "This path is not in the allowed list",
+    "index_running_cannot_delete": "Indexing in progress, cannot delete",
+    "index_already_running": "Indexing task already running",
+    "index_started": "Indexing task started",
+    "indexing": "Indexing…",
+    "indexed": "Indexed {count} files",
+    "status": {
+      "not_indexed": "Not indexed",
+      "running": "Indexing…",
+      "done": "Indexed",
+      "failed": "Indexing failed",
+      "unknown": "Unknown status"
+    }
+  },
+  "search": {
+    "empty_query": "Query must not be empty",
+    "no_result": "No matching results",
+    "repo_not_indexed": "Repository indexing not yet complete"
+  },
+  "analyze": {
+    "invalid_mode": "mode must be one of {modes}",
+    "empty_code": "code must not be empty",
+    "custom_prompt_required": "custom mode requires custom_prompt"
+  },
+  "system": {
+    "ready": "Backend service is ready"
+  }
+}

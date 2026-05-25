@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRepoStore }     from '@/stores/repoStore'
 import { useAnalysisStore } from '@/stores/analysisStore'
+
+const { t } = useI18n()
 
 import TopBar        from '@/components/layout/TopBar.vue'
 import StatusBar     from '@/components/layout/StatusBar.vue'
@@ -82,8 +85,8 @@ function onSearched() {
 }
 function openFileFromSearch() { activeNav.value = 'explorer' }
 
-const NAV_LABEL: Record<string, string> = {
-  explorer: '文件资源', search: '搜索结果', bug: 'Bug 扫描', history: '历史记录',
+const NAV_LABEL_KEY: Record<string, string> = {
+  explorer: 'nav.explorer', search: 'nav.search', bug: 'nav.bug', history: 'nav.history',
 }
 const NAV_ICONS = [
   { id: 'explorer', icon: '◫' },
@@ -107,7 +110,7 @@ const NAV_ICONS = [
       <!-- Collapsed icon strip -->
       <template v-if="leftCollapsed">
         <div class="flex flex-col items-center pt-2 gap-1 w-full overflow-hidden">
-          <button class="icon-btn text-cyan" title="展开" @click="leftCollapsed = false">›</button>
+          <button class="icon-btn text-cyan" :title="t('nav.expand')" @click="leftCollapsed = false">›</button>
           <div class="w-5 border-t border-border-dim my-1" />
           <button
             v-for="nav in NAV_ICONS" :key="nav.id"
@@ -122,7 +125,7 @@ const NAV_ICONS = [
       <template v-else>
         <!-- Fixed header: 标题 + 收起按钮 -->
         <div class="px-3 pt-3 pb-1 flex items-center justify-between flex-shrink-0">
-          <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">仓库</span>
+          <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">{{ t('nav.section') }}</span>
           <button
             class="w-5 h-5 flex items-center justify-center rounded font-mono text-[11px]
                    text-text-muted hover:text-cyan hover:bg-cyan-dim transition-colors"
@@ -142,7 +145,7 @@ const NAV_ICONS = [
           <!-- Nav label -->
           <div class="px-3 py-1 flex-shrink-0">
             <span class="font-mono text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-              {{ NAV_LABEL[activeNav] ?? activeNav }}
+              {{ NAV_LABEL_KEY[activeNav] ? t(NAV_LABEL_KEY[activeNav]) : activeNav }}
             </span>
           </div>
           <div class="flex-shrink-0">
@@ -156,11 +159,11 @@ const NAV_ICONS = [
             <template v-if="activeNav === 'explorer'">
               <div v-if="!repo.currentRepo"
                 class="px-4 py-3 font-mono text-[11px] text-text-muted">
-                请先添加仓库
+                {{ t('repo.noRepo') }}
               </div>
               <div v-else-if="!repo.fileTree.length"
                 class="px-4 py-3 font-mono text-[11px] text-text-muted animate-pulse">
-                文件树加载中...
+                {{ t('repo.treeLoading') }}
               </div>
               <!-- min-w-max 让文件树横向撑开，外层 overflow-x-auto 提供横滚 -->
               <div v-else class="min-w-max pb-2">
@@ -183,7 +186,7 @@ const NAV_ICONS = [
             <template v-else-if="activeNav === 'bug'">
               <div class="p-4 flex flex-col gap-3">
                 <p class="font-mono text-[11px] text-text-muted leading-relaxed">
-                  选择文件后点击工具栏「Bug」按钮分析。
+                  {{ t('repo.bugTip') }}
                 </p>
                 <button
                   class="py-2.5 rounded-lg font-mono text-[12px] font-semibold
@@ -193,7 +196,7 @@ const NAV_ICONS = [
                   :class="{ 'opacity-40 cursor-not-allowed': !repo.isIndexDone }"
                   @click="analysis.setTab('bug')"
                 >
-                  <span>◉</span> 打开 Bug 检测面板
+                  <span>◉</span> {{ t('repo.openBugPanel') }}
                 </button>
               </div>
             </template>

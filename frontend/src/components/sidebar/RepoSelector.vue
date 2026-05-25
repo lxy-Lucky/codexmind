@@ -1,24 +1,28 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRepoStore } from '@/stores/repoStore'
 import type { Repo } from '@/types'
 
+const { t } = useI18n()
 const repo    = useRepoStore()
 const showAdd    = ref(false)
 const newName    = ref('')
 const newPath    = ref('')
-const newSkipRaw = ref('')   // 逗号分隔的目录名，如 "View, sheet, Property"
+const newSkipRaw = ref('')
 const adding     = ref(false)
 const err        = ref('')
 const confirmDeleteId = ref<string | null>(null)
 
 function parseSkipDirs(raw: string): string[] {
-  // 支持逗号或换行分隔，方便多条路径管理
   return raw.split(/[,\n]/).map(s => s.trim()).filter(Boolean)
 }
 
-const STATUS_LABEL: Record<number, string> = {
-  0: '未索引', 1: '索引中...', 2: '已就绪', 3: '失败',
+const STATUS_KEY: Record<number, string> = {
+  0: 'repo.status.notIndexed',
+  1: 'repo.status.indexing',
+  2: 'repo.status.ready',
+  3: 'repo.status.failed',
 }
 const STATUS_COLOR: Record<number, string> = {
   0: 'text-text-muted', 1: 'text-amber animate-pulse-dot',
@@ -54,7 +58,6 @@ function select(r: Repo) { repo.selectRepo(r) }
 <template>
   <div class="flex flex-col gap-0.5 px-2 pb-2">
 
-    <!-- All repos (current highlighted) -->
     <div
       v-for="r in repo.repos"
       :key="r.id"
@@ -79,17 +82,15 @@ function select(r: Repo) { repo.selectRepo(r) }
           {{ r.name }}
         </div>
         <div class="font-mono text-[10px] flex gap-2">
-          <span class="text-text-muted">{{ r.file_count }} 文件</span>
-          <span :class="STATUS_COLOR[r.indexed]">{{ STATUS_LABEL[r.indexed] }}</span>
+          <span class="text-text-muted">{{ r.file_count }} {{ t('repo.fileSuffix') }}</span>
+          <span :class="STATUS_COLOR[r.indexed]">{{ t(STATUS_KEY[r.indexed]) }}</span>
           <span v-if="r.skip_dirs?.length" class="text-amber/70">
-            跳过 {{ r.skip_dirs.length }} 目录
+            {{ t('repo.skipPrefix', { n: r.skip_dirs.length }) }}
           </span>
         </div>
       </div>
 
-      <!-- Action buttons (visible on hover) -->
       <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-        <!-- Index button -->
         <button
           v-if="r.indexed !== 2 && r.id === repo.currentRepo?.id"
           class="px-1.5 py-0.5 rounded font-mono text-[10px] border border-cyan/40
@@ -98,68 +99,62 @@ function select(r: Repo) { repo.selectRepo(r) }
           :disabled="repo.indexing"
           @click.stop="repo.triggerIndex()"
         >
-          {{ repo.indexing ? '...' : '索引' }}
+          {{ repo.indexing ? '...' : t('repo.index') }}
         </button>
 
-        <!-- Delete button -->
         <button
           v-if="confirmDeleteId !== r.id"
           class="w-5 h-5 flex items-center justify-center rounded
                  font-mono text-[10px] text-text-muted
                  hover:text-red-accent hover:bg-red-accent/10 transition-colors"
-          title="删除仓库"
+          :title="t('repo.deleteRepo')"
           @click.stop="confirmDeleteId = r.id"
         >
           ✕
         </button>
-        <!-- Confirm delete -->
         <template v-else>
           <button
             class="px-1.5 py-0.5 rounded font-mono text-[10px] bg-red-accent/20
                    border border-red-accent/50 text-red-accent hover:bg-red-accent/30 transition-colors"
             @click.stop="confirmDelete(r.id)"
           >
-            确认
+            {{ t('common.confirm') }}
           </button>
           <button
             class="px-1.5 py-0.5 rounded font-mono text-[10px] border border-border-dim
                    text-text-muted hover:text-text-primary transition-colors"
             @click.stop="confirmDeleteId = null"
           >
-            取消
+            {{ t('common.cancel') }}
           </button>
         </template>
       </div>
     </div>
 
-    <!-- Add repo button -->
     <button
       class="mt-1 flex items-center gap-2 px-3 py-2 rounded-md font-mono text-[11px]
              text-text-muted border border-dashed border-border-dim hover:border-cyan
              hover:text-cyan transition-colors"
       @click="showAdd = !showAdd"
     >
-      <span>＋</span> 添加仓库
+      <span>＋</span> {{ t('repo.addRepo') }}
     </button>
 
-    <!-- Add repo form -->
     <Transition name="slide-down">
       <div v-if="showAdd" class="mt-1 p-3 bg-bg-surface border border-border-dim rounded-md flex flex-col gap-2">
-        <input v-model="newName" placeholder="仓库名称" class="input-sm" />
+        <input v-model="newName" :placeholder="t('repo.form.namePlaceholder')" class="input-sm" />
         <input
           v-model="newPath"
-          placeholder="C:\Users\...\my-project"
+          :placeholder="t('repo.form.pathPlaceholder')"
           class="input-sm font-mono text-[11px]"
         />
-        <!-- 跳过目录：逗号分隔，选填 -->
         <div class="flex flex-col gap-1">
           <textarea
             v-model="newSkipRaw"
-            placeholder="跳过目录（选填，一行一条或逗号分隔）&#10;例：&#10;View&#10;WEB-INF/src/Property&#10;WEB-INF/sheet"
+            :placeholder="t('repo.form.skipPlaceholder')"
             rows="3"
             class="input-sm font-mono text-[11px] resize-none leading-relaxed"
           />
-          <!-- 实时预览 tag -->
           <div v-if="parseSkipDirs(newSkipRaw).length" class="flex flex-wrap gap-1">
             <span
               v-for="d in parseSkipDirs(newSkipRaw)"
@@ -177,14 +172,14 @@ function select(r: Repo) { repo.selectRepo(r) }
             :disabled="adding"
             @click="addRepo"
           >
-            {{ adding ? '添加中...' : '确认添加' }}
+            {{ adding ? t('repo.adding') : t('repo.addRepoConfirm') }}
           </button>
           <button
             class="px-3 py-1.5 rounded font-mono text-[11px] border border-border-dim
                    text-text-muted hover:text-text-primary transition-colors"
             @click="showAdd = false"
           >
-            取消
+            {{ t('common.cancel') }}
           </button>
         </div>
       </div>
@@ -208,7 +203,6 @@ function select(r: Repo) { repo.selectRepo(r) }
          focus:border-cyan transition-colors;
 }
 
-/* slide-down transition */
 .slide-down-enter-active { transition: all 0.18s ease-out; }
 .slide-down-leave-active { transition: all 0.12s ease-in; }
 .slide-down-enter-from, .slide-down-leave-to {

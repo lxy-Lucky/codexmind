@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { useSystemStatus } from '@/composables/useSystemStatus'
 import { useSearchStore }  from '@/stores/searchStore'
 import { useAnalysisStore } from '@/stores/analysisStore'
 
+const { t } = useI18n()
 const { status, online } = useSystemStatus()
 const search   = useSearchStore()
 const analysis = useAnalysisStore()
@@ -13,24 +15,24 @@ const analysis = useAnalysisStore()
     <div class="flex items-center gap-4">
       <span class="status-item">
         <span class="dot" :class="online ? 'bg-green-accent' : 'bg-red-accent'" />
-        向量索引: {{ online ? '在线' : '离线' }}
+        {{ t('statusbar.vectorIndex') }}: {{ online ? t('common.online') : t('common.offline') }}
       </span>
       <span v-if="status" class="status-item">
         {{ status.embedding_device.toUpperCase() }} · {{ status.embedding_model.split('/')[1] }}
       </span>
       <span v-if="status" class="status-item">
-        上下文窗口: {{ status.context_window }}
+        {{ t('statusbar.contextWindow') }}: {{ status.context_window }}
       </span>
     </div>
     <div class="flex items-center gap-4">
       <span v-if="search.latencyMs" class="status-item">
-        检索耗时: {{ search.latencyMs }}ms
+        {{ t('statusbar.searchLatency') }}: {{ search.latencyMs }}ms
       </span>
       <span v-if="analysis.latencyMs" class="status-item">
-        分析耗时: {{ (analysis.latencyMs / 1000).toFixed(1) }}s
+        {{ t('statusbar.analysisLatency') }}: {{ (analysis.latencyMs / 1000).toFixed(1) }}s
       </span>
       <span v-if="analysis.confidence" class="status-item">
-        置信度: {{ Math.round(analysis.confidence * 100) }}%
+        {{ t('statusbar.confidence') }}: {{ Math.round(analysis.confidence * 100) }}%
       </span>
       <span class="status-item">UTF-8 · LF</span>
     </div>

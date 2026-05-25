@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { useAnalysisStore } from '@/stores/analysisStore'
 import { useEditorStore }   from '@/stores/editorStore'
 
+const { t } = useI18n()
 const analysis = useAnalysisStore()
 const editor   = useEditorStore()
 
@@ -17,11 +19,10 @@ const codeContext = computed(() => {
   const h = editor.highlightLines
   if (!f) return null
   const fileName = f.path.split('/').pop()
-  const lineInfo = h ? `L${h[0]}–${h[1]}` : `${f.line_count} 行`
+  const lineInfo = h ? `L${h[0]}–${h[1]}` : t('toolbar.lineSuffix', { n: f.line_count })
   return { fileName, lineInfo, language: f.language }
 })
 
-// 调用链摘要（显示在 chat 顶部作为上下文提示）
 const callContext = computed(() => {
   const callers = analysis.currentCallers || []
   const callees = analysis.currentCallees || []
@@ -68,13 +69,12 @@ function onKeydown(e: KeyboardEvent) {
 <template>
   <div class="flex flex-col h-full min-h-0">
 
-    <!-- 代码上下文 banner -->
     <div
       v-if="codeContext"
       class="flex-shrink-0 flex items-center gap-2 px-4 py-2
              bg-bg-surface border-b border-border-dim"
     >
-      <span class="font-mono text-[10px] text-text-muted">上下文</span>
+      <span class="font-mono text-[10px] text-text-muted">{{ t('chat.contextLabel') }}</span>
       <span class="font-mono text-[11px] text-cyan font-semibold">{{ codeContext.fileName }}</span>
       <span class="font-mono text-[10px] text-text-muted">{{ codeContext.lineInfo }}</span>
       <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-bg-elevated text-text-muted ml-auto">
@@ -82,13 +82,12 @@ function onKeydown(e: KeyboardEvent) {
       </span>
     </div>
 
-    <!-- 调用链上下文摘要 -->
     <div
       v-if="callContext"
       class="flex-shrink-0 px-4 py-2 bg-bg-deep border-b border-border-dim/50
              font-mono text-[10px] flex items-center gap-3 flex-wrap"
     >
-      <span class="text-text-muted">调用链</span>
+      <span class="text-text-muted">{{ t('chat.callChainLabel') }}</span>
       <span v-if="callContext.callers.length" class="text-amber">
         ▲ {{ callContext.callers.map(c => c.method_name).slice(0,2).join(', ') }}
         {{ callContext.callers.length > 2 ? `+${callContext.callers.length - 2}` : '' }}
@@ -97,14 +96,12 @@ function onKeydown(e: KeyboardEvent) {
         ▼ {{ callContext.callees.map(c => c.method_name).slice(0,2).join(', ') }}
         {{ callContext.callees.length > 2 ? `+${callContext.callees.length - 2}` : '' }}
       </span>
-      <span class="text-text-muted ml-auto">已注入 AI 上下文</span>
+      <span class="text-text-muted ml-auto">{{ t('chat.contextInjected') }}</span>
     </div>
 
-    <!-- 消息列表 -->
     <div ref="scrollRef" class="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 min-h-0">
       <template v-for="(msg, idx) in analysis.chatHistory" :key="idx">
 
-        <!-- 用户气泡 -->
         <div v-if="msg.role === 'user'" class="self-end max-w-[85%]">
           <div class="px-3.5 py-2.5 rounded-2xl rounded-tr-sm
                      bg-cyan/15 border border-cyan/25
@@ -114,7 +111,6 @@ function onKeydown(e: KeyboardEvent) {
           </div>
         </div>
 
-        <!-- AI 气泡 -->
         <div v-else class="max-w-[95%] flex items-start gap-2">
           <div
             class="w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center
@@ -145,7 +141,6 @@ function onKeydown(e: KeyboardEvent) {
               v-html="renderMd(msg.content) || '&nbsp;'"
             />
 
-            <!-- 引用来源（如果 msg 带了 sources） -->
             <div
               v-if="!msg.streaming && msg.sources?.length"
               class="mt-1.5 flex flex-wrap gap-1"
@@ -163,15 +158,13 @@ function onKeydown(e: KeyboardEvent) {
 
       </template>
 
-      <!-- 空状态 -->
       <div v-if="!analysis.chatHistory.length" class="flex-1 flex flex-col items-center justify-center text-text-muted">
         <div class="text-3xl mb-3 opacity-20">◇</div>
-        <div class="font-mono text-[12px]">选中代码后，直接提问</div>
-        <div class="font-mono text-[10px] mt-1 opacity-60">调用链上下文会自动注入</div>
+        <div class="font-mono text-[12px]">{{ t('chat.emptyTitle') }}</div>
+        <div class="font-mono text-[10px] mt-1 opacity-60">{{ t('chat.emptyHint') }}</div>
       </div>
     </div>
 
-    <!-- 操作栏 -->
     <div
       v-if="analysis.chatHistory.length"
       class="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-t border-border-dim"
@@ -179,21 +172,20 @@ function onKeydown(e: KeyboardEvent) {
       <button
         class="font-mono text-[10px] text-text-muted hover:text-text-secondary transition-colors"
         @click="analysis.clearChat()"
-      >清空对话</button>
+      >{{ t('chat.clear') }}</button>
       <button
         v-if="analysis.chatStreaming"
         class="ml-auto font-mono text-[10px] text-red-accent hover:opacity-70
                transition-opacity flex items-center gap-1"
         @click="analysis.abort()"
       >
-        <span class="animate-pulse-dot">●</span> 停止
+        <span class="animate-pulse-dot">●</span> {{ t('common.stop') }}
       </button>
       <span v-else class="ml-auto font-mono text-[10px] text-text-muted">
-        {{ analysis.chatHistory.filter(m => m.role === 'user').length }} 条问题
+        {{ t('chat.questionCount', { n: analysis.chatHistory.filter(m => m.role === 'user').length }) }}
       </span>
     </div>
 
-    <!-- 输入框 -->
     <div class="flex-shrink-0 px-3 pb-3 pt-1.5">
       <div
         class="flex items-end gap-2 bg-bg-surface border rounded-xl px-3 py-2 transition-all"
@@ -205,7 +197,7 @@ function onKeydown(e: KeyboardEvent) {
           ref="inputRef"
           v-model="inputText"
           :rows="rows"
-          placeholder="输入问题... (Enter 发送 / Shift+Enter 换行)"
+          :placeholder="t('chat.inputPlaceholder')"
           class="flex-1 bg-transparent font-mono text-[12px] text-text-primary
                  placeholder-text-muted outline-none resize-none leading-relaxed
                  min-h-[24px] max-h-[120px]"
@@ -227,8 +219,8 @@ function onKeydown(e: KeyboardEvent) {
         </button>
       </div>
       <div class="font-mono text-[9px] text-text-muted mt-1 px-1 flex justify-between">
-        <span>Enter 发送 · Shift+Enter 换行</span>
-        <span v-if="inputText.length > 200" class="text-amber">{{ inputText.length }} 字</span>
+        <span>{{ t('chat.hotkeyHint') }}</span>
+        <span v-if="inputText.length > 200" class="text-amber">{{ t('chat.charCount', { n: inputText.length }) }}</span>
       </div>
     </div>
 

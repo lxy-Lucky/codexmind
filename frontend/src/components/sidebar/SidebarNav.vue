@@ -1,14 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 defineProps<{ active: string }>()
 const emit = defineEmits<{ (e: 'change', id: string): void }>()
 
-type NavItem = { id: string; icon: string; label: string }
-const navItems: NavItem[] = [
-  { id: 'explorer', icon: '◫', label: '文件资源' },
-  { id: 'search',   icon: '⌕', label: '语义搜索' },
-  // { id: 'bug',      icon: '◉', label: 'Bug 扫描' },
-  // { id: 'history',  icon: '⟲', label: '历史记录' },
-]
+const { t } = useI18n()
+
+type NavItem = { id: string; icon: string; labelKey: string }
+const navItems = computed<NavItem[]>(() => [
+  { id: 'explorer', icon: '◫', labelKey: 'nav.explorer' },
+  { id: 'search',   icon: '⌕', labelKey: 'nav.semantic' },
+])
 </script>
 
 <template>
@@ -21,7 +24,7 @@ const navItems: NavItem[] = [
       @click="emit('change', item.id)"
     >
       <span class="w-5 text-center text-[13px]">{{ item.icon }}</span>
-      <span class="font-mono text-[12px]">{{ item.label }}</span>
+      <span class="font-mono text-[12px]">{{ t(item.labelKey) }}</span>
     </button>
   </nav>
 </template>

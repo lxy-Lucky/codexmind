@@ -7,6 +7,7 @@ import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app.core.i18n import get_locale, t
 from app.db.database import get_db
 from app.models.analysis import AnalysisRequest, ChatMessage
 from app.services.analysis_service import stream_analysis
@@ -21,6 +22,7 @@ VALID_MODES = {"summary", "bug", "deps", "custom"}
 async def analyze_stream(
     request: Request,
     db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
 ):
     body_raw: dict[str, Any] = await request.json()
 
@@ -33,17 +35,17 @@ async def analyze_stream(
     history = [ChatMessage(**m) for m in raw_history if isinstance(m, dict)]
 
     if req.mode not in VALID_MODES:
-        raise HTTPException(400, f"mode 必须是 {VALID_MODES} 之一")
+        raise HTTPException(400, t("analyze.invalid_mode", locale, modes=sorted(VALID_MODES)))
 
     async with db.execute("SELECT id FROM repos WHERE id=?", (req.repo_id,)) as cur:
         if not await cur.fetchone():
-            raise HTTPException(404, "仓库不存在")
+            raise HTTPException(404, t("repo.not_found", locale))
 
     if not req.code.strip():
-        raise HTTPException(400, "code 不能为空")
+        raise HTTPException(400, t("analyze.empty_code", locale))
 
     if req.mode == "custom" and not (req.custom_prompt or "").strip():
-        raise HTTPException(400, "custom 模式需要提供 custom_prompt")
+        raise HTTPException(400, t("analyze.custom_prompt_required", locale))
 
     return StreamingResponse(
         stream_analysis(req, history),

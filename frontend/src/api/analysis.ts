@@ -1,4 +1,5 @@
 import type { AnalysisRequest, ChatMessage, SSEChunk } from '@/types'
+import { i18n, t } from '@/i18n'
 
 const BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
@@ -14,14 +15,17 @@ export function streamAnalysis(
     try {
       const res = await fetch(`${BASE}/api/analyze/stream`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lang':       i18n.global.locale.value,
+        },
         body:    JSON.stringify(req),
         signal:  controller.signal,
       })
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
-        onError(err.detail ?? '分析请求失败')
+        onError(err.detail ?? t('errors.analyzeFailed'))
         return
       }
 
@@ -51,7 +55,7 @@ export function streamAnalysis(
         }
       }
     } catch (e: any) {
-      if (e?.name !== 'AbortError') onError(e?.message ?? '连接中断')
+      if (e?.name !== 'AbortError') onError(e?.message ?? t('errors.connectionLost'))
     }
   })()
 

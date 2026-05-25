@@ -1,0 +1,37 @@
+{
+  "common": {
+    "ok": "成功",
+    "not_found": "見つかりません",
+    "internal_error": "サーバー内部エラー",
+    "bad_request": "リクエストパラメータが不正です"
+  },
+  "repo": {
+    "not_found": "リポジトリが存在しません",
+    "path_not_allowed": "このパスは許可リストに含まれていません",
+    "index_running_cannot_delete": "インデックス作成中のため削除できません",
+    "index_already_running": "インデックス作成タスクは既に実行中です",
+    "index_started": "インデックス作成タスクを開始しました",
+    "indexing": "インデックスを作成中…",
+    "indexed": "インデックス作成完了：{count} 件のファイル",
+    "status": {
+      "not_indexed": "未インデックス",
+      "running": "インデックス作成中…",
+      "done": "インデックス作成完了",
+      "failed": "インデックス作成失敗",
+      "unknown": "不明な状態"
+    }
+  },
+  "search": {
+    "empty_query": "検索キーワードを入力してください",
+    "no_result": "該当する結果が見つかりません",
+    "repo_not_indexed": "リポジトリのインデックス作成が完了していません"
+  },
+  "analyze": {
+    "invalid_mode": "mode は {modes} のいずれかである必要があります",
+    "empty_code": "code を空にすることはできません",
+    "custom_prompt_required": "custom モードでは custom_prompt が必要です"
+  },
+  "system": {
+    "ready": "バックエンドサービスの準備が完了しました"
+  }
+}

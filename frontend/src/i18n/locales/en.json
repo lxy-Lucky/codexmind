@@ -1,0 +1,188 @@
+{
+  "app": {
+    "title": "CodexMind"
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "delete": "Delete",
+    "search": "Search",
+    "loading": "Loading…",
+    "empty": "No data",
+    "stop": "Stop",
+    "clear": "Clear",
+    "online": "Online",
+    "offline": "Offline",
+    "done": "Done"
+  },
+  "language": {
+    "label": "Language",
+    "zh": "中文",
+    "ja": "日本語",
+    "en": "English"
+  },
+  "nav": {
+    "section": "Repository",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "explorer": "Files",
+    "search": "Search results",
+    "bug": "Bug scan",
+    "history": "History",
+    "semantic": "Semantic search"
+  },
+  "topbar": {
+    "indexOnline": "Vector index online",
+    "backendOffline": "Backend offline"
+  },
+  "statusbar": {
+    "vectorIndex": "Vector index",
+    "contextWindow": "Context window",
+    "searchLatency": "Search",
+    "analysisLatency": "Analysis",
+    "confidence": "Confidence"
+  },
+  "repo": {
+    "addRepo": "Add repository",
+    "addRepoConfirm": "Confirm",
+    "adding": "Adding…",
+    "deleteRepo": "Delete repository",
+    "index": "Index",
+    "indexing": "…",
+    "fileSuffix": "files",
+    "skipPrefix": "skip {n} dirs",
+    "noRepo": "Please add a repository first",
+    "treeLoading": "Loading file tree…",
+    "openBugPanel": "Open Bug detection panel",
+    "bugTip": "Select a file, then click the toolbar Bug button to analyze.",
+    "status": {
+      "notIndexed": "Not indexed",
+      "indexing": "Indexing…",
+      "ready": "Ready",
+      "failed": "Failed"
+    },
+    "form": {
+      "namePlaceholder": "Repository name",
+      "pathPlaceholder": "C:\\Users\\...\\my-project",
+      "skipPlaceholder": "Skip dirs (optional, one per line or comma-separated)\nExample:\nView\nWEB-INF/src/Property\nWEB-INF/sheet"
+    }
+  },
+  "search": {
+    "title": "Semantic search",
+    "placeholder": "Enter what to search…",
+    "onlyLang": "Only:",
+    "searching": "Searching…",
+    "submit": "Search",
+    "warnNotIndexed": "Repository not indexed yet. Click \"Index\" on the left",
+    "warnSelectRepo": "Please add and select a repository on the left"
+  },
+  "searchResults": {
+    "noMatch": "No matching code found. Try a different description",
+    "matchCount": "{n} matches",
+    "lineSuffix": "{n} lines",
+    "collapse": "▲ Collapse",
+    "expandAll": "▼ Expand all ({n} lines)",
+    "snippetEmpty": "Re-trigger indexing to display code snippets",
+    "openFile": "Open file",
+    "aiAnalyze": "AI Analyze",
+    "initialHint": "Enter a natural language query above"
+  },
+  "toolbar": {
+    "copyPath": "Copy path",
+    "noFile": "No file open",
+    "lineSuffix": "{n} lines",
+    "summaryTitle": "Code explain",
+    "summaryShort": "Explain",
+    "bugTitle": "Bug detect",
+    "bugShort": "Bug",
+    "depsTitle": "Dependency analysis",
+    "depsShort": "Deps"
+  },
+  "editor": {
+    "emptyPrimary": "Pick a file from the tree on the left",
+    "emptySecondary": "Or locate code via semantic search",
+    "loading": "Loading…"
+  },
+  "analysis": {
+    "engineTitle": "AI Analysis Engine",
+    "tabs": {
+      "summary": "Explain",
+      "bug": "Bug",
+      "deps": "Graph",
+      "history": "History",
+      "chat": "Chat"
+    }
+  },
+  "summary": {
+    "title": "AI semantic analysis",
+    "generating": "Generating…",
+    "confidence": "Confidence",
+    "callChainTitle": "Call chain context",
+    "callers": "▲ Callers (who calls this method)",
+    "callees": "▼ Callees (what this method calls)",
+    "empty": "Select code, then click toolbar Explain button"
+  },
+  "bug": {
+    "detecting": "Detecting bugs…",
+    "detectedCount": "Detected {n} issues",
+    "suggestion": "Suggestion:",
+    "empty": "Select code, then click toolbar Bug button",
+    "parseFailed": "Failed to parse bug detection result"
+  },
+  "chat": {
+    "contextLabel": "Context",
+    "callChainLabel": "Call chain",
+    "contextInjected": "Injected into AI context",
+    "emptyTitle": "Select code, then ask directly",
+    "emptyHint": "Call chain context is injected automatically",
+    "clear": "Clear chat",
+    "questionCount": "{n} questions",
+    "inputPlaceholder": "Type a question… (Enter to send / Shift+Enter for newline)",
+    "hotkeyHint": "Enter to send · Shift+Enter for newline",
+    "charCount": "{n} chars",
+    "requestFailed": "Request failed: {msg}"
+  },
+  "history": {
+    "recent": "Recent {n} queries",
+    "empty": "No history yet",
+    "resultsSuffix": "{n} results",
+    "rerun": "Re-run",
+    "modes": {
+      "semantic": "Semantic",
+      "bug": "Bug",
+      "explain": "Explain",
+      "deps": "Deps"
+    }
+  },
+  "deps": {
+    "views": {
+      "method": "Method call graph",
+      "class": "Class dependency graph",
+      "impact": "Impact"
+    },
+    "legend": {
+      "controller": "Controller",
+      "service": "Service",
+      "dao": "DAO/Mapper",
+      "sql": "SQL",
+      "util": "Util/Other"
+    },
+    "empty": "Select a code line — the call graph will appear here",
+    "loading": "Loading…",
+    "depth": "Depth",
+    "reset": "⤢ Reset",
+    "resetTitle": "Reset view",
+    "tooltipMeta": "PageRank: {pr} · Inbound: {in}",
+    "impactSummary": "{n} methods affected (within {d} hops)"
+  },
+  "errors": {
+    "requestFailed": "Request failed",
+    "analyzeFailed": "Analysis request failed",
+    "connectionLost": "Connection lost",
+    "noFileOpen": "Please open a file first",
+    "noFileOrSelection": "Please open a file or select code",
+    "noCodeSelected": "// no code selected"
+  }
+}

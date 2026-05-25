@@ -4,6 +4,7 @@ import { streamAnalysis, streamChat } from '@/api/analysis'
 import { repoApi } from '@/api/repo'
 import { useEditorStore } from './editorStore'
 import { useRepoStore } from './repoStore'
+import { t } from '@/i18n'
 import type { AnalysisMode, BugItem, ChatMessage, SSEChunk } from '@/types'
 
 export const useAnalysisStore = defineStore('analysis', () => {
@@ -49,7 +50,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     const editorStore = useEditorStore()
     const repoStore   = useRepoStore()
     const file = editorStore.currentFile
-    if (!file) { error.value = '请先打开文件'; return }
+    if (!file) { error.value = t('errors.noFileOpen'); return }
 
     activeTab.value = 'deps'
 
@@ -92,7 +93,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     if (!repoStore.currentRepo) return
 
     const sel = editorStore.getSelectedCode()
-    if (!sel) { error.value = '请先打开文件或选中代码'; return }
+    if (!sel) { error.value = t('errors.noFileOrSelection'); return }
 
     const targetMode = mode ?? _tabToMode(activeTab.value)
     activeTab.value  = _modeToTab(targetMode)
@@ -126,7 +127,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
         _abort = null
         if (targetMode === 'bug') {
           try { bugItems.value = JSON.parse(_extractJson(rawBuf)) }
-          catch { error.value = 'Bug 检测结果解析失败\n' + rawBuf }
+          catch { error.value = t('bug.parseFailed') + '\n' + rawBuf }
         }
       },
       (msg) => { streaming.value = false; error.value = msg; _abort = null },
@@ -160,7 +161,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
         file_path:     editorStore.currentFile?.path ?? '',
         line_start:    sel?.lineStart ?? 1,
         line_end:      sel?.lineEnd ?? 1,
-        code:          sel?.code ?? '// 未选中代码',
+        code:          sel?.code ?? t('errors.noCodeSelected'),
         mode:          'custom',
         custom_prompt: userMessage.trim(),
       },
@@ -172,7 +173,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
         _abort = null
       },
       (msg) => {
-        chatHistory.value[aiIdx].content  = `⚠ 请求失败：${msg}`
+        chatHistory.value[aiIdx].content  = `⚠ ${t('chat.requestFailed', { msg })}`
         chatHistory.value[aiIdx].streaming = false
         chatHistory.value[aiIdx].error    = true
         chatStreaming.value = false

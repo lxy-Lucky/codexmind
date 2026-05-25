@@ -1,0 +1,37 @@
+{
+  "common": {
+    "ok": "成功",
+    "not_found": "未找到",
+    "internal_error": "服务器内部错误",
+    "bad_request": "请求参数错误"
+  },
+  "repo": {
+    "not_found": "仓库不存在",
+    "path_not_allowed": "该路径不在允许的白名单内",
+    "index_running_cannot_delete": "索引进行中，无法删除",
+    "index_already_running": "索引任务已在运行中",
+    "index_started": "索引任务已启动",
+    "indexing": "正在建立索引…",
+    "indexed": "索引完成，共 {count} 个文件",
+    "status": {
+      "not_indexed": "尚未索引",
+      "running": "索引进行中…",
+      "done": "索引完成",
+      "failed": "索引失败",
+      "unknown": "未知状态"
+    }
+  },
+  "search": {
+    "empty_query": "查询内容不能为空",
+    "no_result": "未找到匹配结果",
+    "repo_not_indexed": "仓库尚未完成索引"
+  },
+  "analyze": {
+    "invalid_mode": "mode 必须是 {modes} 之一",
+    "empty_code": "code 不能为空",
+    "custom_prompt_required": "custom 模式需要提供 custom_prompt"
+  },
+  "system": {
+    "ready": "后端服务已就绪"
+  }
+}

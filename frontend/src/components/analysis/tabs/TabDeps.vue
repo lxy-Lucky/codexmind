@@ -13,11 +13,11 @@
         <span class="view-select-arrow">▾</span>
       </div>
       <div class="legend">
-        <span class="dot controller">Controller</span>
-        <span class="dot service">Service</span>
-        <span class="dot dao">DAO/Mapper</span>
-        <span class="dot sql">SQL</span>
-        <span class="dot util">Util/Other</span>
+        <span class="dot controller">{{ t('deps.legend.controller') }}</span>
+        <span class="dot service">{{ t('deps.legend.service') }}</span>
+        <span class="dot dao">{{ t('deps.legend.dao') }}</span>
+        <span class="dot sql">{{ t('deps.legend.sql') }}</span>
+        <span class="dot util">{{ t('deps.legend.util') }}</span>
       </div>
     </div>
 
@@ -25,19 +25,19 @@
     <div class="graph-wrap" ref="graphWrap">
       <svg ref="svgRef" class="graph-svg" />
       <div class="graph-empty" v-if="isEmpty && !loading">
-        <span>选中代码行后，调用图将在此显示</span>
+        <span>{{ t('deps.empty') }}</span>
       </div>
-      <div class="graph-loading" v-if="loading">加载中…</div>
+      <div class="graph-loading" v-if="loading">{{ t('deps.loading') }}</div>
 
       <!-- 浮动控件：深度调节 + 重置视图（右下角） -->
       <div class="floating-controls" v-if="!isEmpty">
         <div class="depth-control" v-if="activeView !== 'class'">
-          <span class="depth-label">深度</span>
+          <span class="depth-label">{{ t('deps.depth') }}</span>
           <button @click="changeDepth(-1)" :disabled="depth <= 1">−</button>
           <span class="depth-val">{{ depth }}</span>
           <button @click="changeDepth(1)" :disabled="depth >= 5">+</button>
         </div>
-        <button class="recenter-btn" @click="fitToView" title="重置视图">⤢ 重置</button>
+        <button class="recenter-btn" @click="fitToView" :title="t('deps.resetTitle')">{{ t('deps.reset') }}</button>
       </div>
     </div>
 
@@ -50,20 +50,26 @@
       <div class="tt-name">{{ hovered.name }}</div>
       <div class="tt-class" v-if="hovered.class_name">{{ hovered.class_name }}</div>
       <div class="tt-file">{{ hovered.file_path }}</div>
-      <div class="tt-meta">PageRank: {{ hovered.pagerank.toFixed(4) }} · 被调用: {{ hovered.in_degree }}</div>
+      <div class="tt-meta">{{ t('deps.tooltipMeta', { pr: hovered.pagerank.toFixed(4), in: hovered.in_degree }) }}</div>
     </div>
 
     <!-- 影响域统计 -->
     <div class="impact-banner" v-if="activeView === 'impact' && impactData">
-      共 <strong>{{ impactData.total_affected }}</strong> 个方法受影响（{{ impactData.max_depth }} 跳以内）
+      <i18n-t keypath="deps.impactSummary" tag="span">
+        <template #n><strong>{{ impactData.total_affected }}</strong></template>
+        <template #d>{{ impactData.max_depth }}</template>
+      </i18n-t>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as d3 from 'd3'
 import { graphApi, type GraphNode, type GraphEdge, type GraphResponse, type ImpactResponse } from '@/api/graph'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   repoId: string
@@ -75,11 +81,11 @@ const props = defineProps<{
 
 // ── State ──────────────────────────────────────────────────────────────────
 type ViewKey = 'method' | 'class' | 'impact'
-const views = [
-  { key: 'method' as ViewKey,  label: '方法调用图' },
-  { key: 'class'  as ViewKey,  label: '类依赖图'   },
-  { key: 'impact' as ViewKey,  label: '影响域'      },
-]
+const views = computed(() => [
+  { key: 'method' as ViewKey,  label: t('deps.views.method') },
+  { key: 'class'  as ViewKey,  label: t('deps.views.class')  },
+  { key: 'impact' as ViewKey,  label: t('deps.views.impact') },
+])
 
 const activeView  = ref<ViewKey>('method')
 const depth       = ref(2)

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAnalysisStore } from '@/stores/analysisStore'
 import { useRepoStore }     from '@/stores/repoStore'
 import TabSummary from './tabs/TabSummary.vue'
@@ -7,30 +9,29 @@ import TabDeps    from './tabs/TabDeps.vue'
 import TabHistory from './tabs/TabHistory.vue'
 import TabChat    from './tabs/TabChat.vue'
 
+const { t } = useI18n()
 const analysis = useAnalysisStore()
 const repo     = useRepoStore()
 
-type Tab = { id: typeof analysis.activeTab; label: string; icon: string }
-const tabs: Tab[] = [
-  { id: 'summary', label: '代码解读', icon: '◆' },
-  { id: 'bug',     label: 'Bug',      icon: '◉' },
-  { id: 'deps',    label: '依赖图',   icon: '⟳' },
-  { id: 'history', label: '历史',     icon: '⟲' },
-  { id: 'chat',    label: '问答',     icon: '💬' },
-]
+type Tab = { id: typeof analysis.activeTab; labelKey: string; icon: string }
+const tabs = computed<Tab[]>(() => [
+  { id: 'summary', labelKey: 'analysis.tabs.summary', icon: '◆' },
+  { id: 'bug',     labelKey: 'analysis.tabs.bug',     icon: '◉' },
+  { id: 'deps',    labelKey: 'analysis.tabs.deps',    icon: '⟳' },
+  { id: 'history', labelKey: 'analysis.tabs.history', icon: '⟲' },
+  { id: 'chat',    labelKey: 'analysis.tabs.chat',    icon: '💬' },
+])
 </script>
 
 <template>
   <aside class="analysis-panel">
-    <!-- Header -->
     <div class="border-b border-border-dim flex-shrink-0">
       <div class="px-4 py-2.5 flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <span class="font-mono text-[12px] font-semibold text-text-primary">AI 分析引擎</span>
+          <span class="font-mono text-[12px] font-semibold text-text-primary">{{ t('analysis.engineTitle') }}</span>
           <span class="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded
                        bg-cyan-dim text-cyan border border-cyan/20 leading-none">LLM</span>
         </div>
-        <!-- 当前 tab 流式输出时显示停止按钮 -->
         <button
           v-if="(analysis.streaming && analysis.activeTab !== 'chat') ||
                 (analysis.chatStreaming && analysis.activeTab === 'chat')"
@@ -38,11 +39,10 @@ const tabs: Tab[] = [
                  transition-opacity flex items-center gap-1"
           @click="analysis.abort()"
         >
-          <span class="animate-pulse-dot">●</span> 停止
+          <span class="animate-pulse-dot">●</span> {{ t('common.stop') }}
         </button>
       </div>
 
-      <!-- Tabs -->
       <div class="flex px-2 gap-0 overflow-x-auto">
         <button
           v-for="tab in tabs"
@@ -55,8 +55,7 @@ const tabs: Tab[] = [
           @click="analysis.setTab(tab.id)"
         >
           <span class="opacity-70">{{ tab.icon }}</span>
-          <span>{{ tab.label }}</span>
-          <!-- 问答 tab 有未读消息时显示圆点 -->
+          <span>{{ t(tab.labelKey) }}</span>
           <span
             v-if="tab.id === 'chat' && analysis.chatHistory.length && analysis.activeTab !== 'chat'"
             class="w-1.5 h-1.5 rounded-full bg-cyan animate-pulse-dot"
@@ -65,7 +64,6 @@ const tabs: Tab[] = [
       </div>
     </div>
 
-    <!-- Content -->
     <div class="flex-1 overflow-hidden min-h-0 flex flex-col">
       <TabSummary v-if="analysis.activeTab === 'summary'" />
       <TabBug     v-else-if="analysis.activeTab === 'bug'" />

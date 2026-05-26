@@ -5,10 +5,8 @@ import { useAnalysisStore } from '@/stores/analysisStore'
 import { useRepoStore }     from '@/stores/repoStore'
 import TabSummary from './tabs/TabSummary.vue'
 import TabBug     from './tabs/TabBug.vue'
-import TabDeps    from './tabs/TabDeps.vue'
 import TabHistory from './tabs/TabHistory.vue'
 import TabChat    from './tabs/TabChat.vue'
-import TabDocs    from './tabs/TabDocs.vue'
 
 const { t } = useI18n()
 const analysis = useAnalysisStore()
@@ -18,10 +16,8 @@ type Tab = { id: typeof analysis.activeTab; labelKey: string; icon: string }
 const tabs = computed<Tab[]>(() => [
   { id: 'summary', labelKey: 'analysis.tabs.summary', icon: '◆' },
   { id: 'bug',     labelKey: 'analysis.tabs.bug',     icon: '◉' },
-  { id: 'deps',    labelKey: 'analysis.tabs.deps',    icon: '⟳' },
-  { id: 'history', labelKey: 'analysis.tabs.history', icon: '⟲' },
   { id: 'chat',    labelKey: 'analysis.tabs.chat',    icon: '💬' },
-  { id: 'docs',    labelKey: 'analysis.tabs.docs',    icon: '📄' },
+  { id: 'history', labelKey: 'analysis.tabs.history', icon: '⟲' },
 ])
 </script>
 
@@ -35,9 +31,8 @@ const tabs = computed<Tab[]>(() => [
                        bg-cyan-dim text-cyan border border-cyan/20 leading-none">LLM</span>
         </div>
         <button
-          v-if="(analysis.streaming && analysis.activeTab !== 'chat' && analysis.activeTab !== 'docs') ||
-                (analysis.chatStreaming && analysis.activeTab === 'chat') ||
-                (analysis.docsStreaming && analysis.activeTab === 'docs')"
+          v-if="(analysis.streaming && analysis.activeTab !== 'chat') ||
+                (analysis.chatStreaming && analysis.activeTab === 'chat')"
           class="font-mono text-[10px] text-red-accent hover:opacity-70
                  transition-opacity flex items-center gap-1"
           @click="analysis.abort()"
@@ -54,7 +49,6 @@ const tabs = computed<Tab[]>(() => [
           :class="[
             analysis.activeTab === tab.id ? 'active' : '',
             tab.id === 'chat' ? 'chat-tab' : '',
-            tab.id === 'docs' ? 'docs-tab' : '',
           ]"
           @click="analysis.setTab(tab.id)"
         >
@@ -71,17 +65,8 @@ const tabs = computed<Tab[]>(() => [
     <div class="flex-1 overflow-hidden min-h-0 flex flex-col">
       <TabSummary v-if="analysis.activeTab === 'summary'" />
       <TabBug     v-else-if="analysis.activeTab === 'bug'" />
-      <TabDeps
-        v-else-if="analysis.activeTab === 'deps'"
-        :repoId="repo.currentRepo?.id ?? ''"
-        :symbolId="analysis.currentSymbolId"
-        :className="analysis.currentClassName || undefined"
-        :requestedView="analysis.depsView"
-        :reloadTick="analysis.depsReloadTick"
-      />
-      <TabHistory v-else-if="analysis.activeTab === 'history'" />
       <TabChat    v-else-if="analysis.activeTab === 'chat'" />
-      <TabDocs    v-else-if="analysis.activeTab === 'docs'" />
+      <TabHistory v-else-if="analysis.activeTab === 'history'" />
     </div>
   </aside>
 </template>
@@ -105,11 +90,5 @@ const tabs = computed<Tab[]>(() => [
 }
 .analysis-tab.chat-tab:not(.active):hover {
   @apply text-purple/70;
-}
-.analysis-tab.docs-tab.active {
-  @apply text-green-accent border-green-accent;
-}
-.analysis-tab.docs-tab:not(.active):hover {
-  @apply text-green-accent/70;
 }
 </style>

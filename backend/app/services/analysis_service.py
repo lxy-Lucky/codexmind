@@ -12,6 +12,7 @@ Analysis Service v2
 
 import json
 import logging
+import os
 import time
 from typing import AsyncIterator
 
@@ -596,6 +597,7 @@ async def stream_analysis(
 async def generate_file_docs(
     repo_id: str,
     file_path: str,
+    root_path: str = "",
     locale: str = "en",
 ) -> AsyncIterator[str]:
     """
@@ -642,13 +644,30 @@ async def generate_file_docs(
 
     total = len(classes)
 
-    # 读取源文件（用 Neo4j 存储的绝对路径）
-    full_path = (classes[0].get("full_path") or file_path).replace("\\", "/")
+    # 构造可读文件路径：
+    #   1. 优先用 Neo4j 存的 full_path（可能是绝对路径或相对路径）
+    #   2. 若是相对路径，再尝试与 root_path 拼接
+    neo4j_path = (classes[0].get("full_path") or file_path).replace("\\", "/")
+
+    def _resolve(p: str) -> str:
+        """尝试多种路径组合，返回第一个存在的文件路径；都不存在则原样返回。"""
+        candidates = [p]
+        if root_path:
+            candidates.append(os.path.join(root_path, p).replace("\\", "/"))
+            # 前端传来的 file_path 也试一次
+            if file_path and file_path != p:
+                candidates.append(os.path.join(root_path, file_path).replace("\\", "/"))
+        for c in candidates:
+            if os.path.isfile(c):
+                return c
+        return candidates[0]  # 找不到就返回第一个，让 open 报出真实错误
+
+    abs_path = _resolve(neo4j_path)
     try:
-        with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+        with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:
             all_lines = fh.readlines()
     except Exception as exc:
-        logger.exception("Cannot read file %s: %s", full_path, exc)
+        logger.exception("Cannot read file %s: %s", abs_path, exc)
         yield f"data: {json.dumps({'error': f'Cannot read file: {exc}'}, ensure_ascii=False)}\n\n"
         return
 

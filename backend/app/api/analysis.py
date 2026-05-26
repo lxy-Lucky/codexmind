@@ -67,12 +67,14 @@ async def docs_file_stream(
     locale: str = Depends(get_locale),
 ):
     """整文件文档生成：按类逐一调用 LLM，SSE 流式返回（含 progress 事件）。"""
-    async with db.execute("SELECT id FROM repos WHERE id=?", (repo_id,)) as cur:
-        if not await cur.fetchone():
+    async with db.execute("SELECT id, root_path FROM repos WHERE id=?", (repo_id,)) as cur:
+        row = await cur.fetchone()
+        if not row:
             raise HTTPException(404, t("repo.not_found", locale))
+        root_path: str = row[1] or ""
 
     return StreamingResponse(
-        generate_file_docs(repo_id, file_path, locale=locale),
+        generate_file_docs(repo_id, file_path, root_path=root_path, locale=locale),
         media_type="text/event-stream",
         headers={
             "Cache-Control":               "no-cache",

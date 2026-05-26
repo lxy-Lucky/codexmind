@@ -13,13 +13,16 @@ Analysis Service v2
 import json
 import logging
 import os
+import re
 import time
 from typing import AsyncIterator
 
+import aiosqlite
 import ollama
 
 from app.core.config import settings
 from app.core.neo4j_client import run_query
+from app.db.database import DB_PATH
 from app.models.analysis import AnalysisRequest, AnalysisDoneEvent, ChatMessage
 
 
@@ -499,29 +502,186 @@ def _build_prompt(req: AnalysisRequest, call_context: str, locale: str = "en") -
     )
 
 
+CODE_LARGE_THRESHOLD = 6000  # token，超过此值触发智能检索
+
+
+_SYMBOL_PICKER_PROMPT = {
+    "zh": """\
+你是一个代码导航助手。用户正在查看文件 `{file_path}`，并提出了以下问题：
+
+> {question}
+
+下面是该文件中所有方法/函数的列表（编号 | 类名.方法名 | 行范围）：
+{symbol_list}
+
+请只输出用户问题涉及的方法编号（逗号分隔），不要输出任何其他文字。
+如果你不确定，输出最可能相关的 1-3 个编号。
+示例输出：1,3""",
+    "en": """\
+You are a code navigation assistant. The user is viewing file `{file_path}` and asks:
+
+> {question}
+
+Here are all methods/functions in this file (number | class.method | line range):
+{symbol_list}
+
+Output ONLY the numbers of methods relevant to the question (comma-separated), nothing else.
+If uncertain, output the 1-3 most likely relevant numbers.
+Example output: 1,3""",
+    "ja": """\
+あなたはコードナビゲーションアシスタントです。ユーザーはファイル `{file_path}` を見ており、次の質問をしています：
+
+> {question}
+
+このファイルの全メソッド/関数リスト（番号 | クラス名.メソッド名 | 行範囲）：
+{symbol_list}
+
+質問に関連するメソッド番号のみをカンマ区切りで出力してください。他のテキストは不要です。
+不確かな場合は最も関連性の高い 1〜3 個の番号を出力してください。
+出力例：1,3""",
+}
+
+
+async def _fetch_file_symbols(repo_id: str, file_path: str) -> list[dict]:
+    fp_fwd = file_path.replace("\\", "/")
+    fp_back = file_path.replace("/", "\\")
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT id, method_name, class_name, signature, line_start, line_end
+            FROM symbols
+            WHERE repo_id = ?
+              AND (file_path = ? OR file_path = ?)
+              AND method_name IS NOT NULL
+            ORDER BY line_start
+            """,
+            (repo_id, fp_fwd, fp_back),
+        ) as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+
+def _build_symbol_list(symbols: list[dict]) -> str:
+    lines = []
+    for i, s in enumerate(symbols, 1):
+        cls = s.get("class_name") or ""
+        name = s.get("method_name") or ""
+        label = f"{cls}.{name}" if cls else name
+        lines.append(f"{i} | {label} | L{s['line_start']}-L{s['line_end']}")
+    return "\n".join(lines)
+
+
+async def _pick_symbols_via_llm(
+    file_path: str,
+    question: str,
+    symbol_list_str: str,
+    symbol_count: int,
+    locale: str,
+) -> list[int]:
+    tpl = _SYMBOL_PICKER_PROMPT.get(locale, _SYMBOL_PICKER_PROMPT["en"])
+    prompt = tpl.format(
+        file_path=file_path,
+        question=question,
+        symbol_list=symbol_list_str,
+    )
+    client = ollama.AsyncClient(host=settings.OLLAMA_HOST)
+    resp = await client.chat(
+        model=settings.OLLAMA_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        stream=False,
+        options={"num_ctx": 4096, "temperature": 0},
+    )
+    raw = resp["message"]["content"].strip()
+    nums = []
+    for tok in re.split(r"[,，\s]+", raw):
+        tok = tok.strip()
+        if tok.isdigit():
+            n = int(tok)
+            if 1 <= n <= symbol_count:
+                nums.append(n)
+    return nums or [1]
+
+
+def _extract_symbol_code(
+    source: str, symbols: list[dict], picked_indices: list[int],
+) -> tuple[str, int, int]:
+    lines = source.split("\n")
+    snippets = []
+    first_start = None
+    last_end = 0
+    for idx in picked_indices:
+        s = symbols[idx - 1]
+        ls, le = s["line_start"], s["line_end"]
+        if first_start is None:
+            first_start = ls
+        last_end = max(last_end, le)
+        header = f"// --- {s.get('class_name','')}.{s.get('method_name','')} (L{ls}-L{le}) ---"
+        snippet = "\n".join(lines[ls - 1 : le])
+        snippets.append(f"{header}\n{snippet}")
+    return "\n\n".join(snippets), first_start or 1, last_end or len(lines)
+
+
+async def _resolve_code_for_chat(
+    req: AnalysisRequest, locale: str,
+) -> tuple[str, int, int, str]:
+    """
+    大文件智能检索：查 symbols 目录 → LLM 选方法 → 截取代码。
+    返回 (code, line_start, line_end, pick_info)。
+    pick_info 是选中方法的简要描述，可注入提示供用户感知。
+    """
+    symbols = await _fetch_file_symbols(req.repo_id, req.file_path)
+    if not symbols:
+        code, _ = _truncate_code(req.code, max_tokens=8000)
+        return code, req.line_start, req.line_end, ""
+
+    symbol_list_str = _build_symbol_list(symbols)
+    picked = await _pick_symbols_via_llm(
+        req.file_path, req.custom_prompt or "", symbol_list_str, len(symbols), locale,
+    )
+
+    code, ls, le = _extract_symbol_code(req.code, symbols, picked)
+    code, was_truncated = _truncate_code(code, max_tokens=12000)
+    if was_truncated:
+        code += "\n\n... [代码过长，已截断]"
+
+    picked_names = [
+        f"{symbols[i-1].get('class_name','')}.{symbols[i-1].get('method_name','')}"
+        for i in picked
+    ]
+    pick_info = ", ".join(picked_names)
+    logger.info("Smart resolve picked [%s] for question: %s", pick_info, (req.custom_prompt or "")[:80])
+    return code, ls, le, pick_info
+
+
 def _build_chat_messages(
     req: AnalysisRequest,
     history: list[ChatMessage],
     call_context: str,
     locale: str = "en",
+    *,
+    resolved_code: str | None = None,
+    resolved_lines: tuple[int, int] | None = None,
 ) -> list[dict]:
     prompts = _get_prompts(locale)
     language = _ext_to_lang(req.file_path)
 
-    # 对话模式代码截断：为历史 + 回复留更多空间（8000 token 给代码上下文）
-    code, _ = _truncate_code(req.code, max_tokens=8000)
+    if resolved_code is not None:
+        code = resolved_code
+        line_start, line_end = resolved_lines or (req.line_start, req.line_end)
+    else:
+        code, _ = _truncate_code(req.code, max_tokens=8000)
+        line_start, line_end = req.line_start, req.line_end
 
     system_content = prompts["custom_system"].format(
         file_path    = req.file_path,
-        line_start   = req.line_start,
-        line_end     = req.line_end,
+        line_start   = line_start,
+        line_end     = line_end,
         language     = language,
         code         = code,
         call_context = call_context,
     )
     messages: list[dict] = [{"role": "system", "content": system_content}]
 
-    # 按 token 预算裁剪历史（保留最新的，预算 8000 token）
     HISTORY_TOKEN_BUDGET = 8000
     trimmed: list[ChatMessage] = []
     used = 0
@@ -564,7 +724,25 @@ async def stream_analysis(
 
     # 构造 messages
     if req.mode == "custom":
-        messages = _build_chat_messages(req, history or [], call_context, locale)
+        resolved_code = None
+        resolved_lines = None
+        code_tokens = _estimate_tokens(req.code)
+
+        if code_tokens > CODE_LARGE_THRESHOLD and req.custom_prompt:
+            try:
+                resolved_code, ls, le, pick_info = await _resolve_code_for_chat(req, locale)
+                resolved_lines = (ls, le)
+                if pick_info:
+                    hint = {"smart_resolve": pick_info}
+                    yield f"data: {json.dumps(hint, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.warning("Smart resolve failed, falling back: %s", e)
+
+        messages = _build_chat_messages(
+            req, history or [], call_context, locale,
+            resolved_code=resolved_code,
+            resolved_lines=resolved_lines,
+        )
     else:
         messages = [{"role": "user", "content": _build_prompt(req, call_context, locale)}]
 

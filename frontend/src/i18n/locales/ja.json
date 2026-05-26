@@ -155,7 +155,8 @@
     "inputPlaceholder": "質問を入力…（Enter で送信 / Shift+Enter で改行）",
     "hotkeyHint": "Enter で送信 · Shift+Enter で改行",
     "charCount": "{n} 字",
-    "requestFailed": "リクエスト失敗：{msg}"
+    "requestFailed": "リクエスト失敗：{msg}",
+    "smartResolve": "スマート解決 ›"
   },
   "history": {
     "recent": "直近 {n} 件のクエリ",

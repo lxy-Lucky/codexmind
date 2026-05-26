@@ -155,7 +155,8 @@
     "inputPlaceholder": "输入问题…（Enter 发送 / Shift+Enter 换行）",
     "hotkeyHint": "Enter 发送 · Shift+Enter 换行",
     "charCount": "{n} 字",
-    "requestFailed": "请求失败：{msg}"
+    "requestFailed": "请求失败：{msg}",
+    "smartResolve": "智能定位 ›"
   },
   "history": {
     "recent": "最近 {n} 条查询",

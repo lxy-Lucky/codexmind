@@ -119,6 +119,15 @@ function onKeydown(e: KeyboardEvent) {
           >AI</div>
 
           <div class="flex-1 min-w-0">
+            <div
+              v-if="msg.smartResolve"
+              class="mb-1.5 px-2.5 py-1 rounded-lg bg-cyan/8 border border-cyan/20
+                     font-mono text-[10px] text-cyan/80 flex items-center gap-1.5"
+            >
+              <span>{{ t('chat.smartResolve') }}</span>
+              <span class="text-cyan font-semibold">{{ msg.smartResolve }}</span>
+            </div>
+
             <div v-if="msg.streaming && !msg.content" class="flex items-center gap-1.5 py-2">
               <span
                 v-for="i in 3" :key="i"

@@ -236,6 +236,9 @@ export const useAnalysisStore = defineStore('analysis', () => {
         chatStreaming.value = false
         _abort = null
       },
+      (methods) => {
+        chatHistory.value[aiIdx].smartResolve = methods
+      },
     )
   }
 

@@ -131,6 +131,7 @@ export interface SSEChunk {
   error?: string
   total?: number
   progress?: { current: number; total: number; class_name: string }
+  smart_resolve?: string
 }
 
 export interface DocsProgress {
@@ -147,6 +148,7 @@ export interface ChatMessage {
   timestamp: number
   streaming?: boolean   // assistant 消息流式输出中
   error?: boolean
+  smartResolve?: string // 智能检索命中的方法名
 }
 
 // ── System Status ─────────────────────────────────────────────────────────────

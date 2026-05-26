@@ -8,6 +8,7 @@ export function streamAnalysis(
   onChunk: (text: string) => void,
   onDone: (ev: SSEChunk) => void,
   onError: (msg: string) => void,
+  onSmartResolve?: (methods: string) => void,
 ): () => void {
   const controller = new AbortController()
 
@@ -50,6 +51,7 @@ export function streamAnalysis(
             const chunk: SSEChunk = JSON.parse(json)
             if (chunk.error) { onError(chunk.error); return }
             if (chunk.done)  { onDone(chunk); return }
+            if (chunk.smart_resolve && onSmartResolve) { onSmartResolve(chunk.smart_resolve); continue }
             if (chunk.text)  { onChunk(chunk.text) }
           } catch { /* 不完整 JSON */ }
         }
@@ -128,9 +130,10 @@ export function streamChat(
   onChunk: (text: string) => void,
   onDone:  (ev: SSEChunk) => void,
   onError: (msg: string) => void,
+  onSmartResolve?: (methods: string) => void,
 ): () => void {
   return streamAnalysis(
     { ...req, _history: history.map(m => ({ role: m.role, content: m.content })) },
-    onChunk, onDone, onError,
+    onChunk, onDone, onError, onSmartResolve,
   )
 }

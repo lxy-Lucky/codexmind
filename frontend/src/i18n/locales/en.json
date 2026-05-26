@@ -155,7 +155,8 @@
     "inputPlaceholder": "Type a question… (Enter to send / Shift+Enter for newline)",
     "hotkeyHint": "Enter to send · Shift+Enter for newline",
     "charCount": "{n} chars",
-    "requestFailed": "Request failed: {msg}"
+    "requestFailed": "Request failed: {msg}",
+    "smartResolve": "Smart resolve ›"
   },
   "history": {
     "recent": "Recent {n} queries",

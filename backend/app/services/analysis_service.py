@@ -621,23 +621,53 @@ def _extract_symbol_code(
     return "\n\n".join(snippets), first_start or 1, last_end or len(lines)
 
 
+def _match_symbols_by_name(
+    question: str, symbols: list[dict],
+) -> list[int]:
+    """
+    从用户提问中精确匹配 symbols 表里的 method_name。
+    支持多个方法同时命中（如"A调用了B，怎么配合的"）。
+    返回 1-indexed 编号列表。
+    """
+    matched: list[int] = []
+    q_lower = question.lower()
+    for i, s in enumerate(symbols, 1):
+        name = s.get("method_name") or ""
+        if not name:
+            continue
+        if name.lower() in q_lower:
+            matched.append(i)
+    if len(matched) > 5:
+        by_len = sorted(matched, key=lambda i: len(symbols[i-1].get("method_name", "")), reverse=True)
+        matched = by_len[:5]
+    return matched
+
+
 async def _resolve_code_for_chat(
     req: AnalysisRequest, locale: str,
 ) -> tuple[str, int, int, str]:
     """
-    大文件智能检索：查 symbols 目录 → LLM 选方法 → 截取代码。
+    大文件智能检索：
+      1. 先从用户提问中精确匹配 method_name（快、准）
+      2. 匹配不到再走 LLM 选方法（兜底模糊场景）
     返回 (code, line_start, line_end, pick_info)。
-    pick_info 是选中方法的简要描述，可注入提示供用户感知。
     """
     symbols = await _fetch_file_symbols(req.repo_id, req.file_path)
     if not symbols:
         code, _ = _truncate_code(req.code, max_tokens=8000)
         return code, req.line_start, req.line_end, ""
 
-    symbol_list_str = _build_symbol_list(symbols)
-    picked = await _pick_symbols_via_llm(
-        req.file_path, req.custom_prompt or "", symbol_list_str, len(symbols), locale,
-    )
+    question = req.custom_prompt or ""
+
+    # 第一步：精确匹配
+    picked = _match_symbols_by_name(question, symbols)
+
+    # 第二步：匹配不到 → LLM 兜底
+    if not picked:
+        symbol_list_str = _build_symbol_list(symbols)
+        picked = await _pick_symbols_via_llm(
+            req.file_path, question, symbol_list_str, len(symbols), locale,
+        )
 
     code, ls, le = _extract_symbol_code(req.code, symbols, picked)
     code, was_truncated = _truncate_code(code, max_tokens=12000)
@@ -649,7 +679,7 @@ async def _resolve_code_for_chat(
         for i in picked
     ]
     pick_info = ", ".join(picked_names)
-    logger.info("Smart resolve picked [%s] for question: %s", pick_info, (req.custom_prompt or "")[:80])
+    logger.info("Smart resolve picked [%s] for question: %s", pick_info, question[:80])
     return code, ls, le, pick_info
 
 

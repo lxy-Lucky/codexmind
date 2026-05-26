@@ -115,8 +115,18 @@
       "bug": "Bug",
       "deps": "依赖图",
       "history": "历史",
-      "chat": "问答"
+      "chat": "问答",
+      "docs": "文档"
     }
+  },
+  "docs": {
+    "selectionBtn": "选中生成文档",
+    "fileBtn": "整文件文档",
+    "download": "下载 .md",
+    "processing": "正在处理 {name}…",
+    "generating": "文档生成中…",
+    "emptyTitle": "生成当前文件或选中代码的文档",
+    "emptyHint": "选中生成文档 — 用选中代码；整文件文档 — 按类逐一处理"
   },
   "summary": {
     "title": "AI 语义分析",

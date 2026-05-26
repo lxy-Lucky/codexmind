@@ -115,8 +115,18 @@
       "bug": "Bug",
       "deps": "Graph",
       "history": "History",
-      "chat": "Chat"
+      "chat": "Chat",
+      "docs": "Docs"
     }
+  },
+  "docs": {
+    "selectionBtn": "Docs from selection",
+    "fileBtn": "Whole-file docs",
+    "download": "Download .md",
+    "processing": "Processing {name}…",
+    "generating": "Generating docs…",
+    "emptyTitle": "Generate docs for the current file or selection",
+    "emptyHint": "Selection docs — uses selected code; Whole-file — processes class by class"
   },
   "summary": {
     "title": "AI semantic analysis",

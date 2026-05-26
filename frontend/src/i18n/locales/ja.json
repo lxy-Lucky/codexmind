@@ -115,8 +115,18 @@
       "bug": "Bug",
       "deps": "依存グラフ",
       "history": "履歴",
-      "chat": "Q&A"
+      "chat": "Q&A",
+      "docs": "ドキュメント"
     }
+  },
+  "docs": {
+    "selectionBtn": "選択からドキュメント生成",
+    "fileBtn": "ファイル全体を文書化",
+    "download": ".md をダウンロード",
+    "processing": "{name} を処理中…",
+    "generating": "ドキュメント生成中…",
+    "emptyTitle": "ファイルまたは選択コードのドキュメントを生成",
+    "emptyHint": "選択から生成 — 選択コードを使用；ファイル全体 — クラスごとに処理"
   },
   "summary": {
     "title": "AI セマンティック分析",

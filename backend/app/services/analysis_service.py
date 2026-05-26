@@ -21,6 +21,32 @@ from app.core.config import settings
 from app.core.neo4j_client import run_query
 from app.models.analysis import AnalysisRequest, AnalysisDoneEvent, ChatMessage
 
+
+# ── Token 估算与截断 ────────────────────────────────────────────────────────────
+
+def _estimate_tokens(text: str) -> int:
+    """保守估算：每 3 个字符约 1 个 token（兼容 CJK + ASCII 混合场景）。"""
+    return len(text) // 3
+
+
+def _truncate_code(code: str, max_tokens: int = 20000) -> tuple[str, bool]:
+    """
+    按行边界截断代码，确保不超过 max_tokens 估算值。
+    返回 (截断后代码, 是否发生截断)。
+    """
+    if _estimate_tokens(code) <= max_tokens:
+        return code, False
+    char_budget = max_tokens * 3
+    lines = code.split('\n')
+    result: list[str] = []
+    used = 0
+    for line in lines:
+        used += len(line) + 1  # +1 for newline
+        if used > char_budget:
+            break
+        result.append(line)
+    return '\n'.join(result), True
+
 logger = logging.getLogger(__name__)
 
 
@@ -185,6 +211,33 @@ _PROMPTS_BY_LOCALE: dict[str, dict[str, str]] = {
 {code}
 ```
 """,
+        "docs": """\
+你是一位技术文档工程师。为以下代码生成结构清晰的开发文档，**必须用中文**，直接输出 Markdown：
+
+## 功能概述
+（1-3 句话描述核心职责）
+
+## 方法说明
+
+| 方法 | 功能 | 参数 | 返回值 |
+|------|------|------|--------|
+（逐行列出所有方法）
+
+## 关键依赖
+（调用的外部服务、数据库组件、第三方库等）
+
+## 注意事项
+（边界条件、常见问题、使用限制）
+
+---
+文件：`{file_path}`（第 {line_start}-{line_end} 行）
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
     },
 
     "ja": {
@@ -261,6 +314,33 @@ _PROMPTS_BY_LOCALE: dict[str, dict[str, str]] = {
 あなたはプロのコードアシスタントで、さまざまなプログラミング言語のコードを分析・解説・最適化することが得意です。
 ユーザーの質問に対し、以下のコードコンテキストを踏まえて回答してください。**必ず日本語で回答**し、Markdown 形式に対応します。
 
+ファイル：`{file_path}`（{line_start}-{line_end} 行）
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
+        "docs": """\
+あなたは技術文書エンジニアです。以下のコードについて構造化された開発ドキュメントを生成してください。**必ず日本語で**、Markdown 形式で直接出力してください：
+
+## 機能概要
+（中核となる責任を 1-3 文で）
+
+## メソッド説明
+
+| メソッド | 機能 | パラメータ | 戻り値 |
+|----------|------|------------|--------|
+（全メソッドを列挙）
+
+## 主要な依存関係
+（外部サービス、DB コンポーネント、サードパーティ）
+
+## 注意事項
+（境界条件、よくある問題、使用制限）
+
+---
 ファイル：`{file_path}`（{line_start}-{line_end} 行）
 
 {call_context}
@@ -353,6 +433,33 @@ File: `{file_path}` (lines {line_start}-{line_end})
 {code}
 ```
 """,
+        "docs": """\
+You are a technical documentation engineer. Generate structured developer documentation for the code below. **Always respond in English**, output Markdown directly:
+
+## Overview
+(1-3 sentences describing the core responsibility)
+
+## Method Reference
+
+| Method | Purpose | Parameters | Return |
+|--------|---------|------------|--------|
+(List every method)
+
+## Key Dependencies
+(External services, DB components, third-party libraries)
+
+## Notes
+(Edge cases, common pitfalls, usage constraints)
+
+---
+File: `{file_path}` (lines {line_start}-{line_end})
+
+{call_context}
+
+```{language}
+{code}
+```
+""",
     },
 }
 
@@ -375,12 +482,18 @@ def _build_prompt(req: AnalysisRequest, call_context: str, locale: str = "en") -
     prompts = _get_prompts(locale)
     template = prompts.get(req.mode, prompts["summary"])
     language = _ext_to_lang(req.file_path)
+
+    # 截断代码：为系统 prompt + call_context + 输出预留 ~4000 token
+    code, was_truncated = _truncate_code(req.code, max_tokens=24000)
+    if was_truncated:
+        code += "\n\n... [代码过长，已截断至此处]"
+
     return template.format(
         file_path    = req.file_path,
         line_start   = req.line_start,
         line_end     = req.line_end,
         language     = language,
-        code         = req.code,
+        code         = code,
         call_context = call_context,
     )
 
@@ -393,16 +506,32 @@ def _build_chat_messages(
 ) -> list[dict]:
     prompts = _get_prompts(locale)
     language = _ext_to_lang(req.file_path)
+
+    # 对话模式代码截断：为历史 + 回复留更多空间（8000 token 给代码上下文）
+    code, _ = _truncate_code(req.code, max_tokens=8000)
+
     system_content = prompts["custom_system"].format(
         file_path    = req.file_path,
         line_start   = req.line_start,
         line_end     = req.line_end,
         language     = language,
-        code         = req.code,
+        code         = code,
         call_context = call_context,
     )
     messages: list[dict] = [{"role": "system", "content": system_content}]
-    for msg in history[-20:]:
+
+    # 按 token 预算裁剪历史（保留最新的，预算 8000 token）
+    HISTORY_TOKEN_BUDGET = 8000
+    trimmed: list[ChatMessage] = []
+    used = 0
+    for msg in reversed(history):
+        tokens = _estimate_tokens(msg.content)
+        if used + tokens > HISTORY_TOKEN_BUDGET:
+            break
+        trimmed.insert(0, msg)
+        used += tokens
+
+    for msg in trimmed:
         messages.append({"role": msg.role, "content": msg.content})
     messages.append({"role": "user", "content": req.custom_prompt or ""})
     return messages
@@ -444,7 +573,7 @@ async def stream_analysis(
             model    = settings.OLLAMA_MODEL,
             messages = messages,
             stream   = True,
-            options  = {"num_ctx": 8192},
+            options  = {"num_ctx": 32768},
         )
         async for chunk in stream:
             token = chunk["message"]["content"]
@@ -462,6 +591,122 @@ async def stream_analysis(
     done = AnalysisDoneEvent(confidence=confidence, latency_ms=latency_ms, mode=req.mode)
     yield f"data: {json.dumps({'done': True, **done.model_dump()}, ensure_ascii=False)}\n\n"
     logger.info("Analysis done [%s] mode=%s latency=%dms", req.repo_id, req.mode, latency_ms)
+
+
+async def generate_file_docs(
+    repo_id: str,
+    file_path: str,
+    locale: str = "en",
+) -> AsyncIterator[str]:
+    """
+    整文件文档生成（批处理）：
+      1. 从 Neo4j 按 file_path 查找所有 Class 节点
+      2. 按类逐一调用 LLM，流式 yield SSE 事件
+      3. 每个类开始前 yield progress 事件
+
+    SSE 事件格式：
+      {"text": "..."}                  普通文本 chunk
+      {"progress": {"current": N, "total": M, "class_name": "..."}}  进度
+      {"done": true, "total": N}       全部完成
+      {"error": "..."}                 错误
+    """
+    # 路径规范化，用于多方式匹配
+    norm_path  = file_path.replace("\\", "/")
+    filename   = norm_path.split("/")[-1]
+    file_suffix = "/" + filename  # 带前缀斜杠防止误匹配
+
+    classes = await run_query(
+        """
+        MATCH (c:Class {repo_id: $repo_id})
+        WHERE c.file_path = $file_path
+           OR c.file_path = $norm_path
+           OR c.file_path ENDS WITH $file_suffix
+        RETURN c.id        AS id,
+               c.name      AS name,
+               c.file_path AS full_path,
+               c.line_start AS line_start,
+               c.line_end   AS line_end
+        ORDER BY c.line_start
+        """,
+        {
+            "repo_id":     repo_id,
+            "file_path":   file_path,
+            "norm_path":   norm_path,
+            "file_suffix": file_suffix,
+        },
+    )
+
+    if not classes:
+        yield f"data: {json.dumps({'error': 'No class info found for this file. Please index the repository first.'}, ensure_ascii=False)}\n\n"
+        return
+
+    total = len(classes)
+
+    # 读取源文件（用 Neo4j 存储的绝对路径）
+    full_path = (classes[0].get("full_path") or file_path).replace("\\", "/")
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+            all_lines = fh.readlines()
+    except Exception as exc:
+        logger.exception("Cannot read file %s: %s", full_path, exc)
+        yield f"data: {json.dumps({'error': f'Cannot read file: {exc}'}, ensure_ascii=False)}\n\n"
+        return
+
+    # 文件头
+    display_name = filename
+    header_text  = f"# {display_name} 文档\n\n> 共 {total} 个类 · 自动生成\n\n---\n\n"
+    yield f"data: {json.dumps({'text': header_text}, ensure_ascii=False)}\n\n"
+
+    prompts = _get_prompts(locale)
+    docs_template = prompts.get("docs", prompts["summary"])
+    language = _ext_to_lang(file_path)
+
+    for idx, cls in enumerate(classes, 1):
+        class_name = cls.get("name") or f"Class_{idx}"
+        line_start  = max(1, (cls.get("line_start") or 1))
+        line_end    = cls.get("line_end") or len(all_lines)
+
+        # 进度事件
+        yield f"data: {json.dumps({'progress': {'current': idx, 'total': total, 'class_name': class_name}}, ensure_ascii=False)}\n\n"
+
+        # 截取类代码（0-indexed slice）
+        class_code = "".join(all_lines[line_start - 1 : line_end])
+        class_code, _ = _truncate_code(class_code, max_tokens=12000)
+
+        prompt_text = docs_template.format(
+            file_path    = file_path,
+            line_start   = line_start,
+            line_end     = line_end,
+            language     = language,
+            code         = class_code,
+            call_context = "",
+        )
+
+        # 类标题
+        yield f"data: {json.dumps({'text': f'## `{class_name}`\\n\\n'}, ensure_ascii=False)}\n\n"
+
+        # 流式 LLM 调用
+        try:
+            client = ollama.AsyncClient(host=settings.OLLAMA_HOST)
+            stream = await client.chat(
+                model    = settings.OLLAMA_MODEL,
+                messages = [{"role": "user", "content": prompt_text}],
+                stream   = True,
+                options  = {"num_ctx": 16384},
+            )
+            async for chunk in stream:
+                token = chunk["message"]["content"]
+                if token:
+                    yield f"data: {json.dumps({'text': token}, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            logger.exception("Docs LLM error for class %s: %s", class_name, exc)
+            yield f"data: {json.dumps({'text': f'\\n> ⚠ 生成失败: {exc}\\n'}, ensure_ascii=False)}\n\n"
+
+        # 类分隔符
+        yield f"data: {json.dumps({'text': '\\n\\n---\\n\\n'}, ensure_ascii=False)}\n\n"
+
+    yield f"data: {json.dumps({'done': True, 'total': total}, ensure_ascii=False)}\n\n"
+    logger.info("File docs done [%s] file=%s classes=%d", repo_id, file_path, total)
 
 
 def _estimate_confidence(mode: str, output: str) -> float:

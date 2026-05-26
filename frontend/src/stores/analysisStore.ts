@@ -1,15 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { streamAnalysis, streamChat } from '@/api/analysis'
+import { streamAnalysis, streamChat, streamFileDocs } from '@/api/analysis'
 import { repoApi } from '@/api/repo'
 import { useEditorStore } from './editorStore'
 import { useRepoStore } from './repoStore'
 import { t } from '@/i18n'
-import type { AnalysisMode, BugItem, ChatMessage, SSEChunk } from '@/types'
+import type { AnalysisMode, BugItem, ChatMessage, SSEChunk, DocsProgress } from '@/types'
 
 export const useAnalysisStore = defineStore('analysis', () => {
   // ── State ──────────────────────────────────────────────────────────────────
-  const activeTab      = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat'>('summary')
+  const activeTab      = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat' | 'docs'>('summary')
   const currentSymbolId  = ref('')
   const currentClassName = ref('')
   const depsView       = ref<'method' | 'class' | 'impact'>('class')  // 依赖图子视图
@@ -26,7 +26,13 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const chatHistory  = ref<ChatMessage[]>([])
   const chatStreaming = ref(false)
 
-  let _abort: (() => void) | null = null
+  // ── Docs ───────────────────────────────────────────────────────────────────
+  const docsText      = ref('')
+  const docsStreaming = ref(false)
+  const docsProgress  = ref<DocsProgress | null>(null)
+
+  let _abort:     (() => void) | null = null
+  let _docsAbort: (() => void) | null = null
 
   // ── Actions ────────────────────────────────────────────────────────────────
   function setTab(tab: typeof activeTab.value) {
@@ -81,12 +87,15 @@ export const useAnalysisStore = defineStore('analysis', () => {
 
   function abort() {
     _abort?.()
-    _abort = null
+    _docsAbort?.()
+    _abort     = null
+    _docsAbort = null
     streaming.value    = false
     chatStreaming.value = false
+    docsStreaming.value = false
   }
 
-  // summary / bug / deps
+  // summary / bug / deps / docs
   async function analyze(mode?: AnalysisMode) {
     const repoStore   = useRepoStore()
     const editorStore = useEditorStore()
@@ -96,16 +105,25 @@ export const useAnalysisStore = defineStore('analysis', () => {
     if (!sel) { error.value = t('errors.noFileOrSelection'); return }
 
     const targetMode = mode ?? _tabToMode(activeTab.value)
+    const isDocs     = targetMode === 'docs'
     activeTab.value  = _modeToTab(targetMode)
 
     abort()
-    streaming.value     = true
-    streamingText.value = ''
-    bugItems.value      = []
-    confidence.value    = 0
-    latencyMs.value     = 0
-    error.value         = null
-    hasResult.value     = false
+    error.value = null
+
+    if (isDocs) {
+      docsStreaming.value = true
+      docsText.value      = ''
+      docsProgress.value  = null
+    } else {
+      streaming.value     = true
+      streamingText.value = ''
+      bugItems.value      = []
+      confidence.value    = 0
+      latencyMs.value     = 0
+      hasResult.value     = false
+    }
+
     let rawBuf = ''
 
     _abort = streamAnalysis(
@@ -118,19 +136,58 @@ export const useAnalysisStore = defineStore('analysis', () => {
         mode:       targetMode,
         symbol_id:  currentSymbolId.value || undefined,
       },
-      (text) => { if (targetMode === 'bug') rawBuf += text; else streamingText.value += text },
+      (text) => {
+        if (isDocs)              docsText.value += text
+        else if (targetMode === 'bug') rawBuf += text
+        else                     streamingText.value += text
+      },
       (ev: SSEChunk) => {
-        streaming.value  = false
-        hasResult.value  = true
-        confidence.value = ev.confidence ?? 0
-        latencyMs.value  = ev.latency_ms ?? 0
         _abort = null
-        if (targetMode === 'bug') {
-          try { bugItems.value = JSON.parse(_extractJson(rawBuf)) }
-          catch { error.value = t('bug.parseFailed') + '\n' + rawBuf }
+        if (isDocs) {
+          docsStreaming.value = false
+        } else {
+          streaming.value  = false
+          hasResult.value  = true
+          confidence.value = ev.confidence ?? 0
+          latencyMs.value  = ev.latency_ms ?? 0
+          if (targetMode === 'bug') {
+            try { bugItems.value = JSON.parse(_extractJson(rawBuf)) }
+            catch { error.value = t('bug.parseFailed') + '\n' + rawBuf }
+          }
         }
       },
-      (msg) => { streaming.value = false; error.value = msg; _abort = null },
+      (msg) => {
+        _abort = null
+        if (isDocs) docsStreaming.value = false
+        else streaming.value = false
+        error.value = msg
+      },
+    )
+  }
+
+  /** 整文件文档生成（按类批处理） */
+  async function generateFileDocs() {
+    const repoStore   = useRepoStore()
+    const editorStore = useEditorStore()
+    if (!repoStore.currentRepo || !editorStore.currentFile) {
+      error.value = t('errors.noFileOpen')
+      return
+    }
+
+    activeTab.value     = 'docs'
+    abort()
+    docsText.value      = ''
+    docsStreaming.value = true
+    docsProgress.value  = null
+    error.value         = null
+
+    _docsAbort = streamFileDocs(
+      repoStore.currentRepo.id,
+      editorStore.currentFile.path,
+      (text) => { docsText.value += text },
+      (p)    => { docsProgress.value = p },
+      (_total) => { docsStreaming.value = false; docsProgress.value = null },
+      (msg)  => { docsStreaming.value = false; error.value = msg },
     )
   }
 
@@ -189,10 +246,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   function _tabToMode(tab: string): AnalysisMode {
-    return ({ summary:'summary', bug:'bug', deps:'deps', history:'summary', chat:'custom' } as any)[tab] ?? 'summary'
+    return ({ summary:'summary', bug:'bug', deps:'deps', history:'summary', chat:'custom', docs:'docs' } as any)[tab] ?? 'summary'
   }
   function _modeToTab(mode: AnalysisMode): typeof activeTab.value {
-    return ({ summary:'summary', bug:'bug', deps:'deps', custom:'chat' } as any)[mode] ?? 'summary'
+    return ({ summary:'summary', bug:'bug', deps:'deps', custom:'chat', docs:'docs' } as any)[mode] ?? 'summary'
   }
 
 
@@ -215,6 +272,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     streaming, streamingText, bugItems,
     confidence, latencyMs, error, hasResult,
     chatHistory, chatStreaming,
-    setTab, setGraphSymbol, openDepsGraph, analyze, abort, sendChat, clearChat,
+    docsText, docsStreaming, docsProgress,
+    setTab, setGraphSymbol, openDepsGraph, analyze, abort, sendChat, clearChat, generateFileDocs,
   }
 })

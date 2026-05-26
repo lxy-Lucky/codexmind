@@ -100,7 +100,7 @@ export interface QueryHistory {
 
 // ── Analysis ──────────────────────────────────────────────────────────────────
 
-export type AnalysisMode = 'summary' | 'bug' | 'deps' | 'custom'
+export type AnalysisMode = 'summary' | 'bug' | 'deps' | 'custom' | 'docs'
 
 export interface AnalysisRequest {
   repo_id: string
@@ -129,6 +129,14 @@ export interface SSEChunk {
   latency_ms?: number
   mode?: string
   error?: string
+  total?: number
+  progress?: { current: number; total: number; class_name: string }
+}
+
+export interface DocsProgress {
+  current: number
+  total: number
+  className: string
 }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────

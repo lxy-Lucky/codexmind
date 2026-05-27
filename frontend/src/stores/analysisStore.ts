@@ -203,6 +203,19 @@ export const useAnalysisStore = defineStore('analysis', () => {
 
     const sel = editorStore.getSelectedCode()
 
+    // 确保 symbolId 有值
+    const cursorLine = editorStore.editorInstance?.getPosition()?.lineNumber ?? null
+    const file = editorStore.currentFile
+    if (cursorLine && file && repoStore.currentRepo) {
+      try {
+        const sym = await repoApi.symbolAt(repoStore.currentRepo.id, file.path, cursorLine)
+        if (sym?.id) {
+          currentSymbolId.value  = sym.id
+          currentClassName.value = sym.class_name ?? ''
+        }
+      } catch { /* 忽略 */ }
+    }
+
     // 追加用户消息
     chatHistory.value.push({ role: 'user', content: userMessage.trim(), timestamp: Date.now() })
 
@@ -259,6 +272,19 @@ export const useAnalysisStore = defineStore('analysis', () => {
     if (!repoStore.currentRepo || !userMessage.trim()) return
 
     const sel = editorStore.getSelectedCode()
+
+    // ── 确保 symbolId 有值：从光标位置查询当前方法 ──
+    const cursorLine = editorStore.editorInstance?.getPosition()?.lineNumber ?? null
+    const file = editorStore.currentFile
+    if (cursorLine && file && repoStore.currentRepo) {
+      try {
+        const sym = await repoApi.symbolAt(repoStore.currentRepo.id, file.path, cursorLine)
+        if (sym?.id) {
+          currentSymbolId.value  = sym.id
+          currentClassName.value = sym.class_name ?? ''
+        }
+      } catch { /* 忽略 */ }
+    }
 
     // push user 卡片
     insightCards.value.push({

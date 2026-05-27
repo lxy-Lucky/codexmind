@@ -743,6 +743,61 @@ _INTENT_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+_CODE_RELATED_KEYWORDS = [
+    # 中文
+    "代码", "方法", "函数", "类", "变量", "参数", "返回", "调用", "实现",
+    "逻辑", "循环", "判断", "异常", "报错", "性能", "优化", "重构",
+    "行", "这段", "这个", "这里", "上面", "下面", "怎么", "为什么",
+    "什么意思", "作用", "功能", "流程", "接口", "数据库", "SQL",
+    # 英文
+    "code", "method", "function", "class", "variable", "param", "return",
+    "call", "implement", "logic", "loop", "error", "bug", "performance",
+    "refactor", "line", "this", "how", "why", "what", "explain",
+    # 日文
+    "コード", "メソッド", "関数", "クラス", "変数", "なぜ", "どう",
+]
+
+
+def _is_code_related(question: str) -> bool:
+    """判断问题是否和代码相关。短问题且不含代码关键词 → 不相关。"""
+    q = question.lower()
+    if len(q) < 5:
+        return False  # "你好"、"hi" 等极短问题
+    for kw in _CODE_RELATED_KEYWORDS:
+        if kw.lower() in q:
+            return True
+    return False
+
+
+def _build_plain_chat_messages(
+    req: AnalysisRequest,
+    history: list[ChatMessage],
+    locale: str = "en",
+) -> list[dict]:
+    """纯聊天模式：不注入代码上下文，让 LLM 自然对话。"""
+    system_prompts = {
+        "zh": "你是一位友好的 AI 助手，可以回答各类问题。如果用户想讨论代码，可以引导他们选中代码后提问。用中文回答。",
+        "en": "You are a friendly AI assistant. If the user wants to discuss code, guide them to select code first. Answer in English.",
+        "ja": "あなたは親切なAIアシスタントです。ユーザーがコードについて議論したい場合は、コードを選択するよう案内してください。日本語で回答してください。",
+    }
+    messages: list[dict] = [
+        {"role": "system", "content": system_prompts.get(locale, system_prompts["en"])}
+    ]
+    HISTORY_TOKEN_BUDGET = 4000
+    used = 0
+    trimmed: list[ChatMessage] = []
+    for msg in reversed(history):
+        tokens = _estimate_tokens(msg.content)
+        if used + tokens > HISTORY_TOKEN_BUDGET:
+            break
+        trimmed.insert(0, msg)
+        used += tokens
+    for msg in trimmed:
+        messages.append({"role": msg.role, "content": msg.content})
+    messages.append({"role": "user", "content": req.custom_prompt or ""})
+    return messages
+
+
 def _classify_intent(question: str) -> str:
     """关键词匹配分类用户意图，返回 impact|similar|bug|docs|chat。"""
     q = question.lower()
@@ -896,11 +951,17 @@ async def stream_analysis(
             except Exception as e:
                 logger.warning("Smart resolve failed, falling back: %s", e)
 
-        messages = _build_chat_messages(
-            req, history or [], call_context, locale,
-            resolved_code=resolved_code,
-            resolved_lines=resolved_lines,
-        )
+        # ── chat 意图 + 短问题 → 判断是否需要代码上下文 ──
+        inject_code = intent != "chat" or _is_code_related(req.custom_prompt or "")
+        if inject_code:
+            messages = _build_chat_messages(
+                req, history or [], call_context, locale,
+                resolved_code=resolved_code,
+                resolved_lines=resolved_lines,
+            )
+        else:
+            # 纯聊天：不注入代码，让 LLM 正常对话
+            messages = _build_plain_chat_messages(req, history or [], locale)
     else:
         messages = [{"role": "user", "content": _build_prompt(req, call_context, locale)}]
 

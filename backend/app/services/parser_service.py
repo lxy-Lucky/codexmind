@@ -169,6 +169,201 @@ def _extract_local_var_types(method_node, src: bytes) -> dict[str, str]:
     return var_types
 
 
+# ── JS/TS Type Tracker（import 解析 + 字段/变量类型推断）──────────────────────
+
+def _extract_js_imports(root_node, src: bytes) -> dict[str, str]:
+    """
+    从 AST 根节点提取 ES6 import 和 CommonJS require，返回 {本地绑定名: 推断类型名}。
+    仅处理顶层语句（import 必然在顶层）。
+    """
+    type_map: dict[str, str] = {}
+    for child in root_node.children:
+        # ── ES6: import { Foo } from '...'; import Bar from '...'
+        if child.type == "import_statement":
+            for clause in child.children:
+                if clause.type == "import_clause":
+                    for spec in clause.children:
+                        if spec.type == "identifier":
+                            # default import: import FooService from '...'
+                            name = src[spec.start_byte:spec.end_byte].decode("utf-8", "replace")
+                            type_map[name] = name
+                        elif spec.type == "named_imports":
+                            for imp in spec.children:
+                                if imp.type == "import_specifier":
+                                    alias_node = imp.child_by_field_name("alias")
+                                    name_node = imp.child_by_field_name("name")
+                                    if alias_node:
+                                        local = src[alias_node.start_byte:alias_node.end_byte].decode("utf-8", "replace")
+                                        orig = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace") if name_node else local
+                                    elif name_node:
+                                        local = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+                                        orig = local
+                                    else:
+                                        continue
+                                    type_map[local] = orig
+                        elif spec.type == "namespace_import":
+                            for ns_child in spec.children:
+                                if ns_child.type == "identifier":
+                                    name = src[ns_child.start_byte:ns_child.end_byte].decode("utf-8", "replace")
+                                    type_map[name] = name
+                                    break
+
+        # ── CommonJS: const Foo = require('...'); const { Foo } = require('...')
+        elif child.type in ("lexical_declaration", "variable_declaration"):
+            for decl in child.children:
+                if decl.type != "variable_declarator":
+                    continue
+                value_node = decl.child_by_field_name("value")
+                if not value_node or value_node.type != "call_expression":
+                    continue
+                func_node = value_node.child_by_field_name("function")
+                if not func_node:
+                    continue
+                func_text = src[func_node.start_byte:func_node.end_byte].decode("utf-8", "replace")
+                if func_text != "require":
+                    continue
+                name_node = decl.child_by_field_name("name")
+                if not name_node:
+                    continue
+                if name_node.type == "identifier":
+                    # const Foo = require('...')
+                    name = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+                    type_map[name] = name
+                elif name_node.type == "object_pattern":
+                    # const { Foo, Bar } = require('...')
+                    for prop in name_node.children:
+                        if prop.type == "shorthand_property_identifier_pattern":
+                            pname = src[prop.start_byte:prop.end_byte].decode("utf-8", "replace")
+                            type_map[pname] = pname
+                        elif prop.type == "pair_pattern":
+                            val = prop.child_by_field_name("value")
+                            if val:
+                                pname = src[val.start_byte:val.end_byte].decode("utf-8", "replace")
+                                type_map[pname] = pname
+    return type_map
+
+
+def _extract_js_field_types(class_node, src: bytes) -> dict[str, str]:
+    """
+    从 JS/TS class 中提取字段类型，返回 {字段名: 类型名}。
+    支持: TS 类型注解字段、TS 构造函数参数类型、new 表达式推断。
+    """
+    field_types: dict[str, str] = {}
+    for child in class_node.children:
+        if child.type != "class_body":
+            continue
+        for member in child.children:
+            # TS 类字段: public userService: UserService
+            if member.type in ("public_field_definition", "property_definition"):
+                _try_extract_ts_typed_field(member, src, field_types)
+
+            # 构造函数参数类型: constructor(private svc: UserService)
+            elif member.type == "method_definition":
+                name_node = member.child_by_field_name("name")
+                if name_node:
+                    mname = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+                    if mname == "constructor":
+                        params = member.child_by_field_name("parameters")
+                        if params:
+                            _extract_ts_constructor_param_types(params, src, field_types)
+                        body = member.child_by_field_name("body")
+                        if body:
+                            _extract_new_expr_types(body, src, field_types)
+    return field_types
+
+
+def _try_extract_ts_typed_field(node, src: bytes, out: dict[str, str]) -> None:
+    """从 TS 类字段声明提取 name: Type 映射。"""
+    name_node = node.child_by_field_name("name")
+    if not name_node:
+        return
+    fname = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+    type_ann = node.child_by_field_name("type") or _find_child_type(node, "type_annotation")
+    if type_ann:
+        tname = _extract_type_name_from_annotation(type_ann, src)
+        if tname:
+            out[fname] = tname
+
+
+def _extract_ts_constructor_param_types(params_node, src: bytes, out: dict[str, str]) -> None:
+    """从 TS 构造函数参数提取类型: constructor(private userService: UserService)"""
+    for param in params_node.children:
+        # TS: accessibility_modifier + identifier + type_annotation
+        if param.type not in ("required_parameter", "formal_parameter", param.type):
+            continue
+        pname = None
+        ptype = None
+        for c in param.children:
+            if c.type == "identifier":
+                pname = src[c.start_byte:c.end_byte].decode("utf-8", "replace")
+            elif c.type == "type_annotation":
+                ptype = _extract_type_name_from_annotation(c, src)
+        if pname and ptype:
+            out[pname] = ptype
+
+
+def _extract_new_expr_types(body_node, src: bytes, out: dict[str, str]) -> None:
+    """遍历方法体/构造函数体，从 this.x = new Foo() 或 const x = new Foo() 中推断类型。"""
+    def walk(node):
+        # this.field = new Foo()
+        if node.type == "assignment_expression":
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            if left and right and right.type == "new_expression":
+                ctor_type = _extract_new_ctor_name(right, src)
+                if ctor_type and left.type == "member_expression":
+                    obj = left.child_by_field_name("object")
+                    prop = left.child_by_field_name("property")
+                    if obj and prop:
+                        obj_text = src[obj.start_byte:obj.end_byte].decode("utf-8", "replace")
+                        if obj_text == "this":
+                            fname = src[prop.start_byte:prop.end_byte].decode("utf-8", "replace")
+                            out[fname] = ctor_type
+        # const x = new Foo()
+        elif node.type == "variable_declarator":
+            name_node = node.child_by_field_name("name")
+            value_node = node.child_by_field_name("value")
+            if name_node and value_node and value_node.type == "new_expression":
+                ctor_type = _extract_new_ctor_name(value_node, src)
+                if ctor_type and name_node.type == "identifier":
+                    vname = src[name_node.start_byte:name_node.end_byte].decode("utf-8", "replace")
+                    out[vname] = ctor_type
+        for child in node.children:
+            walk(child)
+    walk(body_node)
+
+
+def _extract_new_ctor_name(new_node, src: bytes) -> str | None:
+    """从 new_expression 节点提取构造函数类名。"""
+    ctor = new_node.child_by_field_name("constructor")
+    if ctor is None:
+        for c in new_node.children:
+            if c.type == "identifier":
+                ctor = c
+                break
+    if ctor:
+        text = src[ctor.start_byte:ctor.end_byte].decode("utf-8", "replace")
+        return text.split(".")[-1].split("<")[0].strip() or None
+    return None
+
+
+def _extract_type_name_from_annotation(ann_node, src: bytes) -> str | None:
+    """从 type_annotation 节点提取简单类型名（去泛型）。"""
+    for child in ann_node.children:
+        if child.type in ("type_identifier", "identifier", "generic_type"):
+            text = src[child.start_byte:child.end_byte].decode("utf-8", "replace")
+            return text.split("<")[0].strip() or None
+    return None
+
+
+def _find_child_type(node, child_type: str):
+    """在直接子节点中按 type 查找。"""
+    for c in node.children:
+        if c.type == child_type:
+            return c
+    return None
+
+
 # ── 调用提取（tree-sitter method_invocation）─────────────────────────────────
 
 def _extract_calls_from_tree(
@@ -187,7 +382,7 @@ def _extract_calls_from_tree(
     if language == "java":
         _walk_java_calls(root, src, calls, var_types)
     elif language in ("javascript", "typescript"):
-        _walk_js_calls(root, src, calls)
+        _walk_js_calls(root, src, calls, var_types)
 
     return list(dict.fromkeys(calls))  # 去重保序
 
@@ -231,8 +426,14 @@ def _walk_java_calls(
         _walk_java_calls(child, src, out, var_types)
 
 
-def _walk_js_calls(node, src: bytes, out: list[str]) -> None:
-    """提取 JS/TS 调用：member_expression（obj.method）和直接 identifier 调用"""
+def _walk_js_calls(
+    node, src: bytes, out: list[str],
+    var_types: dict[str, str] | None = None,
+) -> None:
+    """
+    JS/TS 调用提取。var_types 是 {变量名: 类型名} 映射（import + 字段 + new 推断），
+    用于将 receiver 变量名解析到类型名：userService.save → UserService.save。
+    """
     if node.type == "call_expression":
         func = node.child_by_field_name("function")
         if func:
@@ -242,12 +443,27 @@ def _walk_js_calls(node, src: bytes, out: list[str]) -> None:
                 if obj and prop:
                     obj_text  = src[obj.start_byte:obj.end_byte].decode("utf-8", "replace")
                     prop_text = src[prop.start_byte:prop.end_byte].decode("utf-8", "replace")
-                    obj_last = obj_text.split(".")[-1]
-                    out.append(f"{obj_last}.{prop_text}")
+                    # this.xxx.method() → 提取 xxx 查类型
+                    if obj_text.startswith("this."):
+                        field_name = obj_text.split(".")[1]
+                        raw_obj = field_name
+                    else:
+                        raw_obj = obj_text.split(".")[-1]
+                    raw_obj = re.sub(r"[^\w]", "", raw_obj.split("(")[0])
+                    if var_types and raw_obj in var_types:
+                        resolved = var_types[raw_obj]
+                    else:
+                        resolved = raw_obj
+                    out.append(f"{resolved}.{prop_text}")
             elif func.type == "identifier":
                 out.append(src[func.start_byte:func.end_byte].decode("utf-8", "replace"))
+    elif node.type == "new_expression":
+        # new Foo(...) → "Foo" 当成调用（构造器），与 Java 一致
+        ctor_name = _extract_new_ctor_name(node, src)
+        if ctor_name:
+            out.append(ctor_name)
     for child in node.children:
-        _walk_js_calls(child, src, out)
+        _walk_js_calls(child, src, out, var_types)
 
 
 # ── 注解提取 ──────────────────────────────────────────────────────────────────
@@ -411,6 +627,14 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
     target_types = NODE_TYPES.get(language, [])
     chunks: list[dict] = []
 
+    # JS/TS: 文件级 import 类型映射（顶层提取一次）
+    js_import_types: dict[str, str] = {}
+    if language in ("javascript", "typescript"):
+        try:
+            js_import_types = _extract_js_imports(tree.root_node, source_bytes)
+        except Exception:
+            pass
+
     def walk(node, parent_class: str = "", parent_field_types: dict[str, str] | None = None):
         if "class" in node.type and node.type in target_types:
             # 类名是 identifier 类型的直接子节点，用字节切片保证多字节正确
@@ -418,11 +642,15 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
                 if child.type == "identifier":
                     parent_class = source_bytes[child.start_byte:child.end_byte].decode("utf-8", "replace")
                     break
-            # 提取字段类型（Java 专用），供下层方法使用
             field_types: dict[str, str] = {}
             if language == "java":
                 try:
                     field_types = _extract_field_types(node, source_bytes)
+                except Exception:
+                    pass
+            elif language in ("javascript", "typescript"):
+                try:
+                    field_types = _extract_js_field_types(node, source_bytes)
                 except Exception:
                     pass
             for child in node.children:
@@ -474,6 +702,19 @@ def _extract_from_tree(tree, source: str, language: str, file_path: str) -> list
                         if parent_field_types:
                             var_types.update(parent_field_types)
                         var_types.update(_extract_local_var_types(node, source_bytes))
+                    elif language in ("javascript", "typescript"):
+                        var_types.update(js_import_types)
+                        if parent_field_types:
+                            var_types.update(parent_field_types)
+                        # 方法体内 new 表达式推断
+                        body = node.child_by_field_name("body")
+                        if body:
+                            try:
+                                local_new: dict[str, str] = {}
+                                _extract_new_expr_types(body, source_bytes, local_new)
+                                var_types.update(local_new)
+                            except Exception:
+                                pass
                     calls = _extract_calls_from_tree(
                         node, source_bytes, language, var_types
                     )

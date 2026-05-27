@@ -194,7 +194,7 @@ const NAV_ICONS = [
                          transition-colors flex items-center justify-center gap-2"
                   :disabled="!repo.isIndexDone"
                   :class="{ 'opacity-40 cursor-not-allowed': !repo.isIndexDone }"
-                  @click="analysis.setTab('bug')"
+                  @click="analysis.setTab('insight')"
                 >
                   <span>◉</span> {{ t('repo.openBugPanel') }}
                 </button>

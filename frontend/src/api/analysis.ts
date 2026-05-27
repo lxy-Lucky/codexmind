@@ -9,6 +9,8 @@ export function streamAnalysis(
   onDone: (ev: SSEChunk) => void,
   onError: (msg: string) => void,
   onSmartResolve?: (methods: string) => void,
+  onIntent?: (intent: string) => void,
+  onCard?: (cardType: string, cardData: any) => void,
 ): () => void {
   const controller = new AbortController()
 
@@ -52,6 +54,8 @@ export function streamAnalysis(
             if (chunk.error) { onError(chunk.error); return }
             if (chunk.done)  { onDone(chunk); return }
             if (chunk.smart_resolve && onSmartResolve) { onSmartResolve(chunk.smart_resolve); continue }
+            if (chunk.intent && onIntent) { onIntent(chunk.intent); continue }
+            if (chunk.card_type && chunk.card_data && onCard) { onCard(chunk.card_type, chunk.card_data); continue }
             if (chunk.text)  { onChunk(chunk.text) }
           } catch { /* 不完整 JSON */ }
         }
@@ -131,9 +135,19 @@ export function streamChat(
   onDone:  (ev: SSEChunk) => void,
   onError: (msg: string) => void,
   onSmartResolve?: (methods: string) => void,
+  onIntent?: (intent: string) => void,
+  onCard?: (cardType: string, cardData: any) => void,
 ): () => void {
   return streamAnalysis(
     { ...req, _history: history.map(m => ({ role: m.role, content: m.content })) },
-    onChunk, onDone, onError, onSmartResolve,
+    onChunk, onDone, onError, onSmartResolve, onIntent, onCard,
   )
+}
+
+/** 获取相似代码（REST，非 SSE） */
+export async function fetchSimilarCode(repoId: string, symbolId: string, topK = 5) {
+  const res = await fetch(`${BASE}/api/analyze/${repoId}/similar?symbol_id=${symbolId}&top_k=${topK}`)
+  if (!res.ok) return []
+  const data = await res.json()
+  return data.items ?? []
 }

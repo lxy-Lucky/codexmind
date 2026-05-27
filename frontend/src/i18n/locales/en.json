@@ -116,8 +116,32 @@
       "deps": "Graph",
       "history": "History",
       "chat": "Chat",
-      "docs": "Docs"
+      "docs": "Docs",
+      "insight": "Insight",
+      "graph": "Graph"
     }
+  },
+  "insight": {
+    "selectedMethod": "Current method",
+    "impactTitle": "Impact Analysis",
+    "similarTitle": "Similar Code (Qdrant)",
+    "bugTitle": "Potential Issues",
+    "methods": "methods",
+    "hop": "hop",
+    "more": "more…",
+    "emptyTitle": "Select code and ask a question",
+    "emptyHint": "Graph + Vector + LLM combined analysis",
+    "inputPlaceholder": "Ask anything about this code…",
+    "quickExplain": "Explain",
+    "quickBug": "Find Bugs",
+    "quickImpact": "Impact",
+    "quickSimilar": "Similar",
+    "quickDocs": "Docs",
+    "promptExplain": "Explain the functionality and core logic of this code",
+    "promptBug": "Analyze potential bugs and risks in this code",
+    "promptImpact": "What features would be affected if this code is modified? Do an impact analysis",
+    "promptSimilar": "Are there similar implementations in the codebase?",
+    "promptDocs": "Generate developer documentation for this code"
   },
   "docs": {
     "selectionBtn": "Docs from selection",

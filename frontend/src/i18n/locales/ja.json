@@ -116,8 +116,32 @@
       "deps": "依存グラフ",
       "history": "履歴",
       "chat": "Q&A",
-      "docs": "ドキュメント"
+      "docs": "ドキュメント",
+      "insight": "Insight",
+      "graph": "コールグラフ"
     }
+  },
+  "insight": {
+    "selectedMethod": "現在のメソッド",
+    "impactTitle": "影響分析",
+    "similarTitle": "類似コード (Qdrant)",
+    "bugTitle": "潜在的な問題",
+    "methods": "メソッド",
+    "hop": "ホップ",
+    "more": "さらに…",
+    "emptyTitle": "コードを選択して質問してください",
+    "emptyHint": "グラフ + ベクトル + LLM 統合分析",
+    "inputPlaceholder": "このコードについて何でも質問…",
+    "quickExplain": "説明",
+    "quickBug": "Bug検出",
+    "quickImpact": "影響分析",
+    "quickSimilar": "類似コード",
+    "quickDocs": "ドキュメント",
+    "promptExplain": "このコードの機能とコアロジックを説明してください",
+    "promptBug": "このコードの潜在的なバグとリスクを分析してください",
+    "promptImpact": "このコードを変更すると、どの機能に影響しますか？影響分析をしてください",
+    "promptSimilar": "コードベースにこのコードと似た実装はありますか？",
+    "promptDocs": "このコードの開発者ドキュメントを生成してください"
   },
   "docs": {
     "selectionBtn": "選択からドキュメント生成",

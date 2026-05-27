@@ -599,7 +599,7 @@ async def _pick_symbols_via_llm(
             n = int(tok)
             if 1 <= n <= symbol_count:
                 nums.append(n)
-    return nums or [1]
+    return nums
 
 
 def _extract_symbol_code(
@@ -669,6 +669,11 @@ async def _resolve_code_for_chat(
             req.file_path, question, symbol_list_str, len(symbols), locale,
         )
 
+    # LLM 也没选出来 → 直接截断原代码
+    if not picked:
+        code, _ = _truncate_code(req.code, max_tokens=8000)
+        return code, req.line_start, req.line_end, ""
+
     code, ls, le = _extract_symbol_code(req.code, symbols, picked)
     code, was_truncated = _truncate_code(code, max_tokens=12000)
     if was_truncated:
@@ -728,6 +733,91 @@ def _build_chat_messages(
     return messages
 
 
+# ── 意图分类（关键词匹配，零 LLM 开销）──────────────────────────────────────
+
+_INTENT_KEYWORDS: dict[str, list[str]] = {
+    "impact":  ["影响", "impact", "affect", "改了会", "波及", "影響", "依赖"],
+    "similar": ["相似", "类似", "similar", "一样的", "類似", "有没有类似"],
+    "bug":     ["bug", "问题", "缺陷", "风险", "隐患", "バグ", "漏洞"],
+    "docs":    ["文档", "document", "注释", "ドキュメント", "生成文档"],
+}
+
+
+def _classify_intent(question: str) -> str:
+    """关键词匹配分类用户意图，返回 impact|similar|bug|docs|chat。"""
+    q = question.lower()
+    for intent, keywords in _INTENT_KEYWORDS.items():
+        for kw in keywords:
+            if kw.lower() in q:
+                return intent
+    return "chat"
+
+
+# ── 相似代码检索（Qdrant 向量 NN）──────────────────────────────────────────────
+
+async def find_similar_code(
+    repo_id: str,
+    symbol_id: str,
+    top_k: int = 5,
+) -> list[dict]:
+    """
+    从 Qdrant 检索与指定 symbol 向量最相似的代码片段。
+    直接用 symbol 对应 chunk 的 dense 向量做 NN 查询。
+    """
+    from app.core.qdrant_client import get_qdrant, collection_name, DENSE_VECTOR_NAME
+    from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+
+    client = get_qdrant()
+    col = collection_name(repo_id)
+
+    # 1) 用 scroll 按 payload.symbol_id 找到源 chunk 的 point_id
+    scroll_res = await client.scroll(
+        collection_name=col,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="symbol_id", match=MatchValue(value=symbol_id))]
+        ),
+        limit=1,
+        with_vectors=[DENSE_VECTOR_NAME],
+        with_payload=True,
+    )
+    if not scroll_res[0]:
+        return []
+
+    source_point = scroll_res[0][0]
+    source_vector = source_point.vector
+    if isinstance(source_vector, dict):
+        source_vector = source_vector.get(DENSE_VECTOR_NAME)
+    if not source_vector:
+        return []
+
+    # 2) 用源向量做 NN 查询，排除自身
+    results = await client.query_points(
+        collection_name=col,
+        query=source_vector,
+        using=DENSE_VECTOR_NAME,
+        limit=top_k + 1,
+        with_payload=True,
+    )
+
+    similar = []
+    for hit in results.points:
+        payload = hit.payload or {}
+        if payload.get("symbol_id") == symbol_id:
+            continue
+        similar.append({
+            "file_path":  payload.get("file_path", ""),
+            "line_start": payload.get("line_start", 0),
+            "line_end":   payload.get("line_end", 0),
+            "symbol":     payload.get("symbol", ""),
+            "class_name": payload.get("class_name", ""),
+            "score":      round(hit.score, 3),
+            "snippet":    (payload.get("raw_code", "") or "")[:200],
+        })
+        if len(similar) >= top_k:
+            break
+    return similar
+
+
 # ── SSE 流式生成 ──────────────────────────────────────────────────────────────
 
 async def stream_analysis(
@@ -754,11 +844,49 @@ async def stream_analysis(
 
     # 构造 messages
     if req.mode == "custom":
+        # ── 意图分类 ──
+        intent = _classify_intent(req.custom_prompt or "")
+        yield f"data: {json.dumps({'intent': intent}, ensure_ascii=False)}\n\n"
+
+        # ── 按意图预取数据卡片（Neo4j / Qdrant，不走 LLM）──
+        if intent == "impact" and req.symbol_id:
+            try:
+                from app.services.graph_service import get_impact
+                impact = await get_impact(req.repo_id, req.symbol_id, max_depth=3)
+                card = {
+                    "card_type": "impact",
+                    "card_data": {
+                        "nodes": [
+                            {
+                                "name": n.name, "class_name": n.class_name,
+                                "file_path": n.file_path, "depth": n.depth,
+                                "line_start": n.line_start,
+                            }
+                            for n in impact.nodes if n.id != req.symbol_id
+                        ],
+                        "total": len(impact.nodes) - 1,
+                    },
+                }
+                yield f"data: {json.dumps(card, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.warning("Impact card fetch failed: %s", e)
+
+        elif intent == "similar" and req.symbol_id:
+            try:
+                similar = await find_similar_code(req.repo_id, req.symbol_id, top_k=5)
+                card = {"card_type": "similar", "card_data": similar}
+                yield f"data: {json.dumps(card, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                logger.warning("Similar card fetch failed: %s", e)
+
+        # ── 智能定位：仅对代码相关意图 + 大文件触发 ──
         resolved_code = None
         resolved_lines = None
         code_tokens = _estimate_tokens(req.code)
 
-        if code_tokens > CODE_LARGE_THRESHOLD and req.custom_prompt:
+        if (code_tokens > CODE_LARGE_THRESHOLD
+                and req.custom_prompt
+                and intent not in ("similar", "impact")):
             try:
                 resolved_code, ls, le, pick_info = await _resolve_code_for_chat(req, locale)
                 resolved_lines = (ls, le)

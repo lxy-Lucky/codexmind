@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from app.core.i18n import get_locale, t
 from app.db.database import get_db
 from app.models.analysis import AnalysisRequest, ChatMessage
-from app.services.analysis_service import stream_analysis, generate_file_docs
+from app.services.analysis_service import stream_analysis, generate_file_docs, find_similar_code
 
 router = APIRouter(prefix="/api/analyze", tags=["analysis"])
 logger = logging.getLogger(__name__)
@@ -82,3 +82,19 @@ async def docs_file_stream(
             "Access-Control-Allow-Origin": "*",
         },
     )
+
+
+@router.get("/{repo_id}/similar")
+async def similar_code(
+    repo_id: str,
+    symbol_id: str,
+    top_k: int = 5,
+    db: aiosqlite.Connection = Depends(get_db),
+    locale: str = Depends(get_locale),
+):
+    """查询与指定 symbol 最相似的代码片段（Qdrant 向量 NN）。"""
+    async with db.execute("SELECT id FROM repos WHERE id=?", (repo_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(404, t("repo.not_found", locale))
+    results = await find_similar_code(repo_id, symbol_id, top_k=min(top_k, 20))
+    return {"items": results}

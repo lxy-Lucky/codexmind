@@ -132,6 +132,39 @@ export interface SSEChunk {
   total?: number
   progress?: { current: number; total: number; class_name: string }
   smart_resolve?: string
+  intent?: 'impact' | 'similar' | 'bug' | 'docs' | 'chat'
+  card_type?: 'impact' | 'similar'
+  card_data?: any
+}
+
+// ── Insight Panel ────────────────────────────────────────────────────────────
+
+export type InsightCardType = 'user-msg' | 'ai-msg' | 'impact' | 'similar' | 'bug' | 'docs'
+
+export interface InsightCard {
+  id: string
+  type: InsightCardType
+  data: any
+  timestamp: number
+  streaming?: boolean
+}
+
+export interface ImpactNode {
+  name: string
+  class_name: string
+  file_path: string
+  depth: number
+  line_start: number
+}
+
+export interface SimilarItem {
+  file_path: string
+  line_start: number
+  line_end: number
+  symbol: string
+  class_name: string
+  score: number
+  snippet: string
 }
 
 export interface DocsProgress {

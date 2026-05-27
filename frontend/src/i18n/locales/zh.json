@@ -116,8 +116,32 @@
       "deps": "依赖图",
       "history": "历史",
       "chat": "问答",
-      "docs": "文档"
+      "docs": "文档",
+      "insight": "Insight",
+      "graph": "调用图"
     }
+  },
+  "insight": {
+    "selectedMethod": "当前方法",
+    "impactTitle": "影响分析",
+    "similarTitle": "相似代码 (Qdrant)",
+    "bugTitle": "潜在问题",
+    "methods": "个方法",
+    "hop": "跳",
+    "more": "更多…",
+    "emptyTitle": "选中代码后，直接提问",
+    "emptyHint": "图 + 向量 + LLM 联合分析",
+    "inputPlaceholder": "问任何关于这段代码的问题…",
+    "quickExplain": "解释代码",
+    "quickBug": "找 Bug",
+    "quickImpact": "影响分析",
+    "quickSimilar": "相似代码",
+    "quickDocs": "生成文档",
+    "promptExplain": "请解释这段代码的功能和核心逻辑",
+    "promptBug": "请分析这段代码中的潜在 bug 和风险",
+    "promptImpact": "修改这段代码会影响哪些功能？请做影响分析",
+    "promptSimilar": "在代码库中有没有与这段代码类似的实现？",
+    "promptDocs": "请为这段代码生成开发者文档"
   },
   "docs": {
     "selectionBtn": "选中生成文档",

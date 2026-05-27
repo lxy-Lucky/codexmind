@@ -2,21 +2,17 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAnalysisStore } from '@/stores/analysisStore'
-import { useRepoStore }     from '@/stores/repoStore'
-import TabSummary from './tabs/TabSummary.vue'
-import TabBug     from './tabs/TabBug.vue'
+import InsightPanel from './InsightPanel.vue'
+import TabDeps    from './tabs/TabDeps.vue'
 import TabHistory from './tabs/TabHistory.vue'
-import TabChat    from './tabs/TabChat.vue'
 
 const { t } = useI18n()
 const analysis = useAnalysisStore()
-const repo     = useRepoStore()
 
 type Tab = { id: typeof analysis.activeTab; labelKey: string; icon: string }
 const tabs = computed<Tab[]>(() => [
-  { id: 'summary', labelKey: 'analysis.tabs.summary', icon: '◆' },
-  { id: 'bug',     labelKey: 'analysis.tabs.bug',     icon: '◉' },
-  { id: 'chat',    labelKey: 'analysis.tabs.chat',    icon: '💬' },
+  { id: 'insight', labelKey: 'analysis.tabs.insight', icon: '◇' },
+  { id: 'deps',    labelKey: 'analysis.tabs.graph',   icon: '◆' },
   { id: 'history', labelKey: 'analysis.tabs.history', icon: '⟲' },
 ])
 </script>
@@ -31,8 +27,7 @@ const tabs = computed<Tab[]>(() => [
                        bg-cyan-dim text-cyan border border-cyan/20 leading-none">LLM</span>
         </div>
         <button
-          v-if="(analysis.streaming && analysis.activeTab !== 'chat') ||
-                (analysis.chatStreaming && analysis.activeTab === 'chat')"
+          v-if="analysis.insightStreaming || analysis.streaming"
           class="font-mono text-[10px] text-red-accent hover:opacity-70
                  transition-opacity flex items-center gap-1"
           @click="analysis.abort()"
@@ -46,16 +41,13 @@ const tabs = computed<Tab[]>(() => [
           v-for="tab in tabs"
           :key="tab.id"
           class="analysis-tab flex-shrink-0"
-          :class="[
-            analysis.activeTab === tab.id ? 'active' : '',
-            tab.id === 'chat' ? 'chat-tab' : '',
-          ]"
+          :class="{ active: analysis.activeTab === tab.id }"
           @click="analysis.setTab(tab.id)"
         >
           <span class="opacity-70">{{ tab.icon }}</span>
           <span>{{ t(tab.labelKey) }}</span>
           <span
-            v-if="tab.id === 'chat' && analysis.chatHistory.length && analysis.activeTab !== 'chat'"
+            v-if="tab.id === 'insight' && analysis.insightCards.length && analysis.activeTab !== 'insight'"
             class="w-1.5 h-1.5 rounded-full bg-cyan animate-pulse-dot"
           />
         </button>
@@ -63,10 +55,9 @@ const tabs = computed<Tab[]>(() => [
     </div>
 
     <div class="flex-1 overflow-hidden min-h-0 flex flex-col">
-      <TabSummary v-if="analysis.activeTab === 'summary'" />
-      <TabBug     v-else-if="analysis.activeTab === 'bug'" />
-      <TabChat    v-else-if="analysis.activeTab === 'chat'" />
-      <TabHistory v-else-if="analysis.activeTab === 'history'" />
+      <InsightPanel v-if="analysis.activeTab === 'insight'" />
+      <TabDeps      v-else-if="analysis.activeTab === 'deps'" />
+      <TabHistory   v-else-if="analysis.activeTab === 'history'" />
     </div>
   </aside>
 </template>
@@ -84,11 +75,5 @@ const tabs = computed<Tab[]>(() => [
 }
 .analysis-tab.active {
   @apply text-cyan border-cyan;
-}
-.analysis-tab.chat-tab.active {
-  @apply text-purple border-purple;
-}
-.analysis-tab.chat-tab:not(.active):hover {
-  @apply text-purple/70;
 }
 </style>

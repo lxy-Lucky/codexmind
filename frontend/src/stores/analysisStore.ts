@@ -5,11 +5,11 @@ import { repoApi } from '@/api/repo'
 import { useEditorStore } from './editorStore'
 import { useRepoStore } from './repoStore'
 import { t } from '@/i18n'
-import type { AnalysisMode, BugItem, ChatMessage, SSEChunk, DocsProgress } from '@/types'
+import type { AnalysisMode, BugItem, ChatMessage, SSEChunk, DocsProgress, InsightCard } from '@/types'
 
 export const useAnalysisStore = defineStore('analysis', () => {
   // ── State ──────────────────────────────────────────────────────────────────
-  const activeTab      = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat' | 'docs'>('summary')
+  const activeTab      = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat' | 'docs' | 'insight' | 'graph'>('insight')
   const currentSymbolId  = ref('')
   const currentClassName = ref('')
   const depsView       = ref<'method' | 'class' | 'impact'>('class')  // 依赖图子视图
@@ -30,6 +30,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const docsText      = ref('')
   const docsStreaming = ref(false)
   const docsProgress  = ref<DocsProgress | null>(null)
+
+  // ── Insight Panel ──────────────────────────────────────────────────────────
+  const insightCards    = ref<InsightCard[]>([])
+  const insightStreaming = ref(false)
 
   let _abort:     (() => void) | null = null
   let _docsAbort: (() => void) | null = null
@@ -248,11 +252,102 @@ export const useAnalysisStore = defineStore('analysis', () => {
     chatStreaming.value = false
   }
 
+  /** Insight 面板：统一发送问题，动态生成卡片 */
+  async function sendInsight(userMessage: string) {
+    const repoStore   = useRepoStore()
+    const editorStore = useEditorStore()
+    if (!repoStore.currentRepo || !userMessage.trim()) return
+
+    const sel = editorStore.getSelectedCode()
+
+    // push user 卡片
+    insightCards.value.push({
+      id: `user-${Date.now()}`,
+      type: 'user-msg',
+      data: { content: userMessage.trim() },
+      timestamp: Date.now(),
+    })
+
+    // push AI 占位卡片
+    const aiCardId = `ai-${Date.now()}`
+    insightCards.value.push({
+      id: aiCardId,
+      type: 'ai-msg',
+      data: { content: '', smartResolve: '' },
+      timestamp: Date.now(),
+      streaming: true,
+    })
+
+    insightStreaming.value = true
+    abort()
+
+    const histForBackend = chatHistory.value.slice(0, -2)
+
+    _abort = streamChat(
+      {
+        repo_id:       repoStore.currentRepo.id,
+        file_path:     editorStore.currentFile?.path ?? '',
+        line_start:    sel?.lineStart ?? 1,
+        line_end:      sel?.lineEnd ?? 1,
+        code:          sel?.code ?? t('errors.noCodeSelected'),
+        mode:          'custom',
+        custom_prompt: userMessage.trim(),
+        symbol_id:     currentSymbolId.value || undefined,
+      },
+      histForBackend,
+      // onChunk
+      (text) => {
+        const card = insightCards.value.find(c => c.id === aiCardId)
+        if (card) card.data.content += text
+      },
+      // onDone
+      () => {
+        const card = insightCards.value.find(c => c.id === aiCardId)
+        if (card) card.streaming = false
+        insightStreaming.value = false
+        _abort = null
+      },
+      // onError
+      (msg) => {
+        const card = insightCards.value.find(c => c.id === aiCardId)
+        if (card) {
+          card.data.content = `⚠ ${msg}`
+          card.data.error = true
+          card.streaming = false
+        }
+        insightStreaming.value = false
+        _abort = null
+      },
+      // onSmartResolve
+      (methods) => {
+        const card = insightCards.value.find(c => c.id === aiCardId)
+        if (card) card.data.smartResolve = methods
+      },
+      // onIntent
+      (_intent) => { /* intent received, cards will follow */ },
+      // onCard
+      (cardType, cardData) => {
+        insightCards.value.push({
+          id: `${cardType}-${Date.now()}`,
+          type: cardType as any,
+          data: cardData,
+          timestamp: Date.now(),
+        })
+      },
+    )
+  }
+
+  function clearInsight() {
+    abort()
+    insightCards.value = []
+    insightStreaming.value = false
+  }
+
   function _tabToMode(tab: string): AnalysisMode {
-    return ({ summary:'summary', bug:'bug', deps:'deps', history:'summary', chat:'custom', docs:'docs' } as any)[tab] ?? 'summary'
+    return ({ summary:'summary', bug:'bug', deps:'deps', history:'summary', chat:'custom', docs:'docs', insight:'custom' } as any)[tab] ?? 'summary'
   }
   function _modeToTab(mode: AnalysisMode): typeof activeTab.value {
-    return ({ summary:'summary', bug:'bug', deps:'deps', custom:'chat', docs:'docs' } as any)[mode] ?? 'summary'
+    return ({ summary:'insight', bug:'insight', deps:'deps', custom:'insight', docs:'insight' } as any)[mode] ?? 'insight'
   }
 
 
@@ -276,6 +371,8 @@ export const useAnalysisStore = defineStore('analysis', () => {
     confidence, latencyMs, error, hasResult,
     chatHistory, chatStreaming,
     docsText, docsStreaming, docsProgress,
-    setTab, setGraphSymbol, openDepsGraph, analyze, abort, sendChat, clearChat, generateFileDocs,
+    insightCards, insightStreaming,
+    setTab, setGraphSymbol, openDepsGraph, analyze, abort,
+    sendChat, clearChat, sendInsight, clearInsight, generateFileDocs,
   }
 })

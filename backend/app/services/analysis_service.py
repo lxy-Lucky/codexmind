@@ -33,6 +33,51 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 3
 
 
+def _trim_history_pairs(
+    history: list[ChatMessage],
+    token_budget: int,
+) -> list[ChatMessage]:
+    """
+    按 user+assistant 对从最新往前保留，确保不拆散对话对。
+    如果单条 assistant 消息超长，截断其内容以适配预算。
+    """
+    if not history:
+        return []
+
+    # 将 history 按 user+assistant 对分组（从后往前）
+    pairs: list[list[ChatMessage]] = []
+    i = len(history) - 1
+    while i >= 0:
+        if i >= 1 and history[i - 1].role == "user" and history[i].role == "assistant":
+            pairs.append([history[i - 1], history[i]])
+            i -= 2
+        else:
+            pairs.append([history[i]])
+            i -= 1
+
+    # pairs 现在是从新到旧排列的对话对
+    result: list[ChatMessage] = []
+    used = 0
+    for pair in pairs:
+        pair_tokens = sum(_estimate_tokens(m.content) for m in pair)
+        if used + pair_tokens > token_budget:
+            # 如果是第一对（最近的对话），尝试截断 assistant 消息以适配
+            if not result and len(pair) == 2:
+                user_msg, asst_msg = pair
+                user_tokens = _estimate_tokens(user_msg.content)
+                remaining = token_budget - user_tokens
+                if remaining > 100:  # 至少保留 100 tokens 的 assistant 内容
+                    max_chars = remaining * 3
+                    truncated_content = asst_msg.content[:max_chars] + "…(已截断)"
+                    result = [user_msg, ChatMessage(role=asst_msg.role, content=truncated_content)]
+                    used = token_budget
+            break
+        result = pair + result  # prepend pair to maintain order
+        used += pair_tokens
+
+    return result
+
+
 def _truncate_code(code: str, max_tokens: int = 20000) -> tuple[str, bool]:
     """
     按行边界截断代码，确保不超过 max_tokens 估算值。
@@ -718,14 +763,7 @@ def _build_chat_messages(
     messages: list[dict] = [{"role": "system", "content": system_content}]
 
     HISTORY_TOKEN_BUDGET = 8000
-    trimmed: list[ChatMessage] = []
-    used = 0
-    for msg in reversed(history):
-        tokens = _estimate_tokens(msg.content)
-        if used + tokens > HISTORY_TOKEN_BUDGET:
-            break
-        trimmed.insert(0, msg)
-        used += tokens
+    trimmed = _trim_history_pairs(history, HISTORY_TOKEN_BUDGET)
 
     for msg in trimmed:
         messages.append({"role": msg.role, "content": msg.content})
@@ -776,22 +814,21 @@ def _build_plain_chat_messages(
 ) -> list[dict]:
     """纯聊天模式：不注入代码上下文，让 LLM 自然对话。"""
     system_prompts = {
-        "zh": "你是一位友好的 AI 助手，可以回答各类问题。如果用户想讨论代码，可以引导他们选中代码后提问。用中文回答。",
-        "en": "You are a friendly AI assistant. If the user wants to discuss code, guide them to select code first. Answer in English.",
-        "ja": "あなたは親切なAIアシスタントです。ユーザーがコードについて議論したい場合は、コードを選択するよう案内してください。日本語で回答してください。",
+        "zh": "你是 CodexMind 代码助手。当前处于对话模式。请根据对话历史回答用户问题。如果用户想分析代码，可以引导他们选中代码后提问。用中文回答，简洁友好。",
+        "en": "You are CodexMind code assistant in chat mode. Answer based on conversation history. If the user wants to analyze code, guide them to select code first. Be concise and friendly.",
+        "ja": "あなたはCodexMindコードアシスタントです。会話履歴に基づいて回答してください。ユーザーがコードを分析したい場合は、コードを選択するよう案内してください。",
     }
     messages: list[dict] = [
         {"role": "system", "content": system_prompts.get(locale, system_prompts["en"])}
     ]
-    HISTORY_TOKEN_BUDGET = 4000
-    used = 0
-    trimmed: list[ChatMessage] = []
-    for msg in reversed(history):
-        tokens = _estimate_tokens(msg.content)
-        if used + tokens > HISTORY_TOKEN_BUDGET:
-            break
-        trimmed.insert(0, msg)
-        used += tokens
+    HISTORY_TOKEN_BUDGET = 6000
+    trimmed = _trim_history_pairs(history, HISTORY_TOKEN_BUDGET)
+
+    logger.info("[INSIGHT DEBUG] _build_plain_chat_messages: history=%d, trimmed=%d",
+                len(history), len(trimmed))
+    for i, msg in enumerate(trimmed):
+        logger.info("[INSIGHT DEBUG]   trimmed[%d] role=%s content=%r", i, msg.role, msg.content[:80])
+
     for msg in trimmed:
         messages.append({"role": msg.role, "content": msg.content})
     messages.append({"role": "user", "content": req.custom_prompt or ""})
@@ -888,6 +925,13 @@ async def stream_analysis(
     t0 = time.monotonic()
     full_text: list[str] = []
 
+    # DEBUG: 检查 history 是否到达
+    logger.info("[INSIGHT DEBUG] stream_analysis called, history=%d items, prompt=%r",
+                len(history or []), (req.custom_prompt or "")[:50])
+    if history:
+        for i, m in enumerate(history):
+            logger.info("[INSIGHT DEBUG]   history[%d] role=%s content=%r", i, m.role, m.content[:80])
+
     # 拉取调用链上下文（懒加载式：查询失败不阻断分析）
     call_context = ""
     try:
@@ -953,6 +997,8 @@ async def stream_analysis(
 
         # ── chat 意图 + 短问题 → 判断是否需要代码上下文 ──
         inject_code = intent != "chat" or _is_code_related(req.custom_prompt or "")
+        logger.info("[INSIGHT DEBUG] intent=%s inject_code=%s history_len=%d",
+                    intent, inject_code, len(history or []))
         if inject_code:
             messages = _build_chat_messages(
                 req, history or [], call_context, locale,
@@ -965,13 +1011,20 @@ async def stream_analysis(
     else:
         messages = [{"role": "user", "content": _build_prompt(req, call_context, locale)}]
 
+    # DEBUG: 最终发送给 LLM 的 messages
+    logger.info("[INSIGHT DEBUG] Final messages to LLM (%d total):", len(messages))
+    for i, m in enumerate(messages):
+        role = m.get("role", "?")
+        content = m.get("content", "")
+        logger.info("[INSIGHT DEBUG]   [%d] role=%s len=%d preview=%r", i, role, len(content), content[:100])
+
     try:
         client = ollama.AsyncClient(host=settings.OLLAMA_HOST)
         stream = await client.chat(
             model    = settings.OLLAMA_MODEL,
             messages = messages,
             stream   = True,
-            options  = {"num_ctx": 32768},
+            options  = {"num_ctx": 20480},
         )
         async for chunk in stream:
             token = chunk["message"]["content"]

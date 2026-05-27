@@ -307,7 +307,15 @@ export const useAnalysisStore = defineStore('analysis', () => {
     insightStreaming.value = true
     abort()
 
-    const histForBackend = chatHistory.value.slice(0, -2)
+    // 从 insightCards 中提取对话历史（排除最后两条：当前轮的 user + ai 占位）
+    const histForBackend = insightCards.value
+      .filter(c => c.type === 'user-msg' || c.type === 'ai-msg')
+      .slice(0, -2)  // 排除刚加的当前轮
+      .map(c => ({
+        role:    c.type === 'user-msg' ? 'user' : 'assistant',
+        content: c.data.content || '',
+      }))
+      .filter(m => m.content)
 
     _abort = streamChat(
       {

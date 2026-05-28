@@ -121,6 +121,17 @@ _CALL_CONTEXT_LABELS = {
 }
 
 
+# 全库召回片段段落的多语言文案
+_REPO_CONTEXT_LABELS = {
+    "zh": {"title": "\n### 代码库相关片段（全库语义检索）",
+           "item":  "**`{loc}`** — {path} (L{ls}-L{le})"},
+    "ja": {"title": "\n### コードベース関連スニペット（全体セマンティック検索）",
+           "item":  "**`{loc}`** — {path} (L{ls}-L{le})"},
+    "en": {"title": "\n### Relevant code from the repository (semantic search)",
+           "item":  "**`{loc}`** — {path} (L{ls}-L{le})"},
+}
+
+
 async def _build_call_context(symbol_id: str, repo_id: str, locale: str = "en") -> str:
     """
     从 Neo4j 拉取 1-hop 调用链，构造自然语言摘要注入 prompt。
@@ -741,15 +752,21 @@ def _build_chat_messages(
     *,
     resolved_code: str | None = None,
     resolved_lines: tuple[int, int] | None = None,
+    repo_context: str | None = None,
 ) -> list[dict]:
     prompts = _get_prompts(locale)
     language = _ext_to_lang(req.file_path)
+
+    # 有全库召回时，压缩当前文件代码 + 历史预算，给召回片段腾位置
+    has_repo = bool(repo_context)
+    code_budget    = 5000 if has_repo else 8000
+    history_budget = 6000 if has_repo else 8000
 
     if resolved_code is not None:
         code = resolved_code
         line_start, line_end = resolved_lines or (req.line_start, req.line_end)
     else:
-        code, _ = _truncate_code(req.code, max_tokens=8000)
+        code, _ = _truncate_code(req.code, max_tokens=code_budget)
         line_start, line_end = req.line_start, req.line_end
 
     system_content = prompts["custom_system"].format(
@@ -760,10 +777,11 @@ def _build_chat_messages(
         code         = code,
         call_context = call_context,
     )
+    if repo_context:
+        system_content += "\n" + repo_context
     messages: list[dict] = [{"role": "system", "content": system_content}]
 
-    HISTORY_TOKEN_BUDGET = 8000
-    trimmed = _trim_history_pairs(history, HISTORY_TOKEN_BUDGET)
+    trimmed = _trim_history_pairs(history, history_budget)
 
     for msg in trimmed:
         messages.append({"role": msg.role, "content": msg.content})
@@ -823,11 +841,6 @@ def _build_plain_chat_messages(
     ]
     HISTORY_TOKEN_BUDGET = 6000
     trimmed = _trim_history_pairs(history, HISTORY_TOKEN_BUDGET)
-
-    logger.info("[INSIGHT DEBUG] _build_plain_chat_messages: history=%d, trimmed=%d",
-                len(history), len(trimmed))
-    for i, msg in enumerate(trimmed):
-        logger.info("[INSIGHT DEBUG]   trimmed[%d] role=%s content=%r", i, msg.role, msg.content[:80])
 
     for msg in trimmed:
         messages.append({"role": msg.role, "content": msg.content})
@@ -910,6 +923,49 @@ async def find_similar_code(
     return similar
 
 
+# ── 全库语义召回（问题驱动）────────────────────────────────────────────────────
+
+async def _build_repo_context(
+    repo_id: str,
+    question: str,
+    locale: str = "en",
+    top_k: int = 5,
+    per_snippet_tokens: int = 700,
+) -> str:
+    """
+    用用户问题对全库做混合检索（dense+sparse+RRF+HyDE+rerank，复用 search_service），
+    把 top-k 片段拼成 markdown 注入 prompt。失败或无结果返回空字符串（不阻断对话）。
+    """
+    if not question.strip():
+        return ""
+
+    from app.models.search import SearchRequest
+    from app.services.search_service import semantic_search
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        resp = await semantic_search(
+            SearchRequest(repo_id=repo_id, query=question, top_k=top_k), db
+        )
+
+    if not resp.results:
+        return ""
+
+    labels = _REPO_CONTEXT_LABELS.get(locale, _REPO_CONTEXT_LABELS["en"])
+    lines = [labels["title"]]
+    char_budget = per_snippet_tokens * 3
+    for r in resp.results:
+        loc = f"{r.class_name or ''}.{r.method_name or ''}".strip(".") or (r.method_name or "")
+        snippet = r.snippet or ""
+        if _estimate_tokens(snippet) > per_snippet_tokens:
+            snippet = snippet[:char_budget] + "\n… (截断)"
+        lines.append(labels["item"].format(
+            loc=loc, path=r.file_path, ls=r.line_start, le=r.line_end,
+        ))
+        lines.append(f"```\n{snippet}\n```")
+    return "\n".join(lines)
+
+
 # ── SSE 流式生成 ──────────────────────────────────────────────────────────────
 
 async def stream_analysis(
@@ -924,13 +980,6 @@ async def stream_analysis(
     """
     t0 = time.monotonic()
     full_text: list[str] = []
-
-    # DEBUG: 检查 history 是否到达
-    logger.info("[INSIGHT DEBUG] stream_analysis called, history=%d items, prompt=%r",
-                len(history or []), (req.custom_prompt or "")[:50])
-    if history:
-        for i, m in enumerate(history):
-            logger.info("[INSIGHT DEBUG]   history[%d] role=%s content=%r", i, m.role, m.content[:80])
 
     # 拉取调用链上下文（懒加载式：查询失败不阻断分析）
     call_context = ""
@@ -997,13 +1046,23 @@ async def stream_analysis(
 
         # ── chat 意图 + 短问题 → 判断是否需要代码上下文 ──
         inject_code = intent != "chat" or _is_code_related(req.custom_prompt or "")
-        logger.info("[INSIGHT DEBUG] intent=%s inject_code=%s history_len=%d",
-                    intent, inject_code, len(history or []))
+
+        # ── 全库语义召回（问题驱动）：代码相关问题才触发 ──
+        repo_context = ""
+        if inject_code and req.custom_prompt:
+            try:
+                repo_context = await _build_repo_context(
+                    req.repo_id, req.custom_prompt, locale, top_k=5,
+                )
+            except Exception as e:
+                logger.warning("Repo context fetch failed: %s", e)
+
         if inject_code:
             messages = _build_chat_messages(
                 req, history or [], call_context, locale,
                 resolved_code=resolved_code,
                 resolved_lines=resolved_lines,
+                repo_context=repo_context or None,
             )
         else:
             # 纯聊天：不注入代码，让 LLM 正常对话
@@ -1011,20 +1070,13 @@ async def stream_analysis(
     else:
         messages = [{"role": "user", "content": _build_prompt(req, call_context, locale)}]
 
-    # DEBUG: 最终发送给 LLM 的 messages
-    logger.info("[INSIGHT DEBUG] Final messages to LLM (%d total):", len(messages))
-    for i, m in enumerate(messages):
-        role = m.get("role", "?")
-        content = m.get("content", "")
-        logger.info("[INSIGHT DEBUG]   [%d] role=%s len=%d preview=%r", i, role, len(content), content[:100])
-
     try:
         client = ollama.AsyncClient(host=settings.OLLAMA_HOST)
         stream = await client.chat(
             model    = settings.OLLAMA_MODEL,
             messages = messages,
             stream   = True,
-            options  = {"num_ctx": 20480},
+            options  = {"num_ctx": 32768},
         )
         async for chunk in stream:
             token = chunk["message"]["content"]

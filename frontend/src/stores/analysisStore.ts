@@ -317,9 +317,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
       }))
       .filter(m => m.content)
 
-    console.log('[INSIGHT DEBUG] histForBackend:', JSON.stringify(histForBackend))
-    console.log('[INSIGHT DEBUG] insightCards count:', insightCards.value.length)
-
     _abort = streamChat(
       {
         repo_id:       repoStore.currentRepo.id,

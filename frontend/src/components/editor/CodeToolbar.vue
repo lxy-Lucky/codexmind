@@ -49,11 +49,9 @@ function copyPath() {
       <button class="toolbar-btn danger" :title="t('toolbar.bugTitle')" @click="triggerAnalysis('bug')">
         ◉ {{ t('toolbar.bugShort') }}
       </button>
-      <!-- 依赖图暂时隐藏，待路径追踪功能完善后恢复
       <button class="toolbar-btn purple" :title="t('toolbar.depsTitle')" @click="analysis.openDepsGraph()">
         ⟳ {{ t('toolbar.depsShort') }}
       </button>
-      -->
     </div>
   </div>
 </template>

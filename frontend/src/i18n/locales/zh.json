@@ -213,7 +213,8 @@
     "reset": "⤢ 重置",
     "resetTitle": "重置视图",
     "tooltipMeta": "PageRank: {pr} · 被调用: {in}",
-    "impactSummary": "共 {n} 个方法受影响（{d} 跳以内）"
+    "impactSummary": "共 {n} 个方法受影响（{d} 跳以内）",
+    "dblClickHint": "双击节点可展开其调用链"
   },
   "errors": {
     "requestFailed": "请求失败",

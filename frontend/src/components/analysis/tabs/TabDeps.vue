@@ -1,6 +1,6 @@
 <template>
   <div class="tab-deps">
-    <!-- 工具栏（保留视图切换 + 图例） -->
+    <!-- 工具栏 -->
     <div class="deps-toolbar">
       <div class="view-select-wrap">
         <select
@@ -29,7 +29,7 @@
       </div>
       <div class="graph-loading" v-if="loading">{{ t('deps.loading') }}</div>
 
-      <!-- 浮动控件：深度调节 + 重置视图（右下角） -->
+      <!-- 浮动控件 -->
       <div class="floating-controls" v-if="!isEmpty">
         <div class="depth-control" v-if="activeView !== 'class'">
           <span class="depth-label">{{ t('deps.depth') }}</span>
@@ -38,6 +38,11 @@
           <button @click="changeDepth(1)" :disabled="depth >= 5">+</button>
         </div>
         <button class="recenter-btn" @click="fitToView" :title="t('deps.resetTitle')">{{ t('deps.reset') }}</button>
+      </div>
+
+      <!-- 提示：双击展开 -->
+      <div class="hint-banner" v-if="!isEmpty && !loading && activeView !== 'class'">
+        {{ t('deps.dblClickHint') }}
       </div>
     </div>
 
@@ -50,7 +55,7 @@
       <div class="tt-name">{{ hovered.name }}</div>
       <div class="tt-class" v-if="hovered.class_name">{{ hovered.class_name }}</div>
       <div class="tt-file">{{ hovered.file_path }}</div>
-      <div class="tt-meta">{{ t('deps.tooltipMeta', { pr: hovered.pagerank.toFixed(4), in: hovered.in_degree }) }}</div>
+      <div class="tt-meta">PR: {{ hovered.pagerank.toFixed(4) }} · In: {{ hovered.in_degree }}</div>
     </div>
 
     <!-- 影响域统计 -->
@@ -75,8 +80,8 @@ const props = defineProps<{
   repoId: string
   symbolId?: string
   className?: string
-  requestedView?: ViewKey   // 由工具栏「依赖」按钮驱动，决定激活哪个子视图
-  reloadTick?: number       // 每次点「依赖」按钮都自增，强制重新加载
+  requestedView?: ViewKey
+  reloadTick?: number
 }>()
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -88,7 +93,7 @@ const views = computed(() => [
 ])
 
 const activeView  = ref<ViewKey>('method')
-const depth       = ref(2)
+const depth       = ref(1)   // 默认 depth=1，不炸图
 const loading     = ref(false)
 const isEmpty     = ref(true)
 const hovered     = ref<GraphNode | null>(null)
@@ -99,30 +104,117 @@ const svgRef   = ref<SVGSVGElement>()
 const graphWrap = ref<HTMLDivElement>()
 
 let simulation: d3.Simulation<any, any> | null = null
-// 保存 zoom behavior、SVG selection、节点数据的引用，给"重置视图"按钮 / fitToView 用
 let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null
 let svgSel: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null
 let lastNodeData: any[] = []
 let lastViewport = { W: 0, H: 0 }
 
+// 记录当前图里的 edges（用于高亮路径）
+let currentEdges: GraphEdge[] = []
+let selectedNodeId = ''
+
 // ── Node color by layer ────────────────────────────────────────────────────
 function nodeColor(node: GraphNode): string {
-  // SQL 节点（MyBatis XML 语句）独立配色，比 DAO interface 更暖一档
-  if (node.node_type === 'sql')                                 return 'var(--color-sql,        #ec4899)'
+  if (node.node_type === 'sql')                                 return '#ec4899'
   const fp = (node.file_path || '').toLowerCase()
   const nm = (node.name || '').toLowerCase()
-  if (fp.includes('controller') || nm.includes('controller')) return 'var(--color-controller, #6366f1)'
-  if (fp.includes('service')    || nm.includes('service'))    return 'var(--color-service,    #10b981)'
+  if (fp.includes('controller') || nm.includes('controller')) return '#6366f1'
+  if (fp.includes('service')    || nm.includes('service'))    return '#10b981'
   if (fp.includes('mapper')     || fp.includes('dao')
-    || fp.includes('repository'))                              return 'var(--color-dao,        #f59e0b)'
-  return 'var(--color-util, #64748b)'
+    || fp.includes('repository'))                              return '#f59e0b'
+  return '#64748b'
 }
 
 function nodeRadius(node: GraphNode): number {
   const base = node.node_type === 'class' ? 14
-             : node.node_type === 'sql'   ? 11   // SQL 略大一点
+             : node.node_type === 'sql'   ? 11
              : 10
-  return base + Math.min(node.in_degree * 0.8, 8)
+  return base + Math.min(node.in_degree * 0.6, 6)
+}
+
+// ── 层级计算：BFS 从 center 出发，caller 标负层、callee 标正层 ──
+function computeLayerMap(
+  nodes: GraphNode[], edges: GraphEdge[], centerId: string,
+): Map<string, number> {
+  const layerMap = new Map<string, number>()
+  layerMap.set(centerId, 0)
+
+  // 构建邻接表
+  const outgoing = new Map<string, Set<string>>() // source -> targets (callees)
+  const incoming = new Map<string, Set<string>>() // target -> sources (callers)
+  for (const e of edges) {
+    const src = typeof e.source === 'string' ? e.source : (e.source as any).id
+    const tgt = typeof e.target === 'string' ? e.target : (e.target as any).id
+    if (!outgoing.has(src)) outgoing.set(src, new Set())
+    outgoing.get(src)!.add(tgt)
+    if (!incoming.has(tgt)) incoming.set(tgt, new Set())
+    incoming.get(tgt)!.add(src)
+  }
+
+  // BFS 向下（callees → 正数层）
+  let queue = [centerId]
+  while (queue.length) {
+    const next: string[] = []
+    for (const nid of queue) {
+      const layer = layerMap.get(nid)!
+      for (const callee of outgoing.get(nid) || []) {
+        if (!layerMap.has(callee)) {
+          layerMap.set(callee, layer + 1)
+          next.push(callee)
+        }
+      }
+    }
+    queue = next
+  }
+
+  // BFS 向上（callers → 负数层）
+  queue = [centerId]
+  const visited = new Set([centerId])
+  while (queue.length) {
+    const next: string[] = []
+    for (const nid of queue) {
+      const layer = layerMap.get(nid)!
+      for (const caller of incoming.get(nid) || []) {
+        if (!visited.has(caller)) {
+          visited.add(caller)
+          if (!layerMap.has(caller)) {
+            layerMap.set(caller, layer - 1)
+          }
+          next.push(caller)
+        }
+      }
+    }
+    queue = next
+  }
+
+  // 没有被 BFS 到的节点给个默认层（不应该发生）
+  for (const n of nodes) {
+    if (!layerMap.has(n.id)) layerMap.set(n.id, 0)
+  }
+  return layerMap
+}
+
+// ── 类聚合力：同一个 class_name 的节点互相吸引 ──
+function classClusterForce(alpha: number) {
+  const classGroups = new Map<string, any[]>()
+  for (const n of lastNodeData) {
+    const cls = n.class_name || '__none__'
+    if (!classGroups.has(cls)) classGroups.set(cls, [])
+    classGroups.get(cls)!.push(n)
+  }
+  for (const [, group] of classGroups) {
+    if (group.length < 2) continue
+    // 计算质心
+    let cx = 0, cy = 0
+    for (const n of group) { cx += n.x; cy += n.y }
+    cx /= group.length; cy /= group.length
+    // 向质心靠拢（弱力）
+    const strength = 0.15 * alpha
+    for (const n of group) {
+      n.vx += (cx - n.x) * strength
+      n.vy += (cy - n.y) * strength
+    }
+  }
 }
 
 // ── Fetch & Render ─────────────────────────────────────────────────────────
@@ -148,6 +240,7 @@ async function loadGraph() {
     }
 
     if (!data.nodes.length) { isEmpty.value = true; return }
+    currentEdges = data.edges
     await nextTick()
     renderGraph(data.nodes, data.edges, data.center_id)
   } catch (e) {
@@ -164,6 +257,7 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
   const W = graphWrap.value.clientWidth  || 800
   const H = graphWrap.value.clientHeight || 500
   lastViewport = { W, H }
+  selectedNodeId = ''
 
   // 清空旧图
   d3.select(svgRef.value).selectAll('*').remove()
@@ -174,37 +268,59 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
     .attr('height', H)
   svgSel = svg
 
-  // Zoom（保存 behavior，供 fitToView / 重置视图按钮重新设置 transform）
+  // Zoom
   const g = svg.append('g')
   zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
     .scaleExtent([0.1, 4])
     .on('zoom', (e) => g.attr('transform', e.transform))
   svg.call(zoomBehavior)
 
-  // Arrow marker
-  svg.append('defs').append('marker')
-    .attr('id', 'arrow')
-    .attr('viewBox', '0 -4 8 8')
-    .attr('refX', 18).attr('refY', 0)
-    .attr('markerWidth', 6).attr('markerHeight', 6)
-    .attr('orient', 'auto')
-    .append('path')
-    .attr('d', 'M0,-4L8,0L0,4')
-    .attr('fill', '#94a3b8')
+  // 点击空白处取消选中
+  svg.on('click', () => {
+    selectedNodeId = ''
+    updateHighlight()
+  })
 
-  // 节点初始位置：在中心周围一圈上均匀分布（不要全堆在 W/2,H/2，
-  // 否则 charge 一上来全炸出 viewport，肉眼看到的就是"图飞出去了"）
+  // Arrow markers: normal + highlighted
+  const defs = svg.append('defs')
+  for (const [id, color] of [['arrow', '#475569'], ['arrow-hl', '#00d4ff']] as const) {
+    defs.append('marker')
+      .attr('id', id)
+      .attr('viewBox', '0 -4 8 8')
+      .attr('refX', 18).attr('refY', 0)
+      .attr('markerWidth', 6).attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-4L8,0L0,4')
+      .attr('fill', color)
+  }
+
+  // ── 层级计算 ──
+  const layerMap = computeLayerMap(nodes, edges, centerId)
+
+  // 节点初始位置：按层分排
   const cx = W / 2, cy = H / 2
-  const ringR = Math.min(W, H) * 0.25
+  const layerSpacing = 100
   const nodeMap = new Map(
     nodes.map((n, i) => {
-      const angle = (i / Math.max(nodes.length, 1)) * 2 * Math.PI
-      const x = n.id === centerId ? cx : cx + Math.cos(angle) * ringR
-      const y = n.id === centerId ? cy : cy + Math.sin(angle) * ringR
-      return [n.id, { ...n, x, y }]
+      const layer = layerMap.get(n.id) ?? 0
+      // 同层内水平分散
+      const sameLayerNodes = nodes.filter(nn => (layerMap.get(nn.id) ?? 0) === layer)
+      const idx = sameLayerNodes.indexOf(n)
+      const xSpread = Math.min(W * 0.6, sameLayerNodes.length * 60)
+      const xOffset = sameLayerNodes.length > 1
+        ? -xSpread / 2 + (idx / (sameLayerNodes.length - 1)) * xSpread
+        : 0
+      return [n.id, {
+        ...n,
+        x: cx + xOffset + (Math.random() - 0.5) * 20,
+        y: cy + layer * layerSpacing + (Math.random() - 0.5) * 10,
+        layer,
+      }]
     })
   )
-  // 中心节点钉在视口中心，不让 force 把它甩走
+
+  // 中心节点 pin 住
   const centerNode = nodeMap.get(centerId) as any
   if (centerNode) {
     centerNode.fx = cx
@@ -218,59 +334,81 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
   const nodeData = Array.from(nodeMap.values())
   lastNodeData = nodeData
 
-  // Force 参数随节点数量自适应：节点多 → 减小斥力 + 缩短连线，避免铺满屏幕外
   const N = nodeData.length
-  const chargeStrength = N > 60 ? -80 : N > 30 ? -180 : -280
-  const linkDistance   = N > 60 ?  55 : N > 30 ?   75 :   95
 
-  // Simulation
+  // ── Force 配置：层级 + 聚合 ──
+  // 核心思路：forceY 按 layer 把节点拉到该层的 Y 位置，
+  //          classCluster 让同类方法靠拢，
+  //          charge 保持节点间距但不太强
+  const chargeStrength = N > 60 ? -60 : N > 30 ? -120 : -200
+  const linkDist = N > 60 ? 60 : N > 30 ? 80 : 100
+
   simulation = d3.forceSimulation(nodeData)
-    .force('link', d3.forceLink(links).id((d: any) => d.id).distance(linkDistance).strength(0.5))
+    .force('link', d3.forceLink(links).id((d: any) => d.id).distance(linkDist).strength(0.6))
     .force('charge', d3.forceManyBody().strength(chargeStrength))
-    .force('center', d3.forceCenter(cx, cy).strength(0.08))   // 弱中心力，配合 ring init
-    .force('collide', d3.forceCollide().radius((d: any) => nodeRadius(d) + 6))
-    // X/Y 软约束：把节点往视口内拉，等效于"边界弹性墙"
-    .force('x', d3.forceX(cx).strength(0.05))
-    .force('y', d3.forceY(cy).strength(0.05))
+    .force('collide', d3.forceCollide().radius((d: any) => nodeRadius(d) + 8))
+    // 层级 Y 约束：每层一个目标 Y 位置，strength 较强保持层次感
+    .force('layerY', d3.forceY((d: any) => cy + d.layer * layerSpacing).strength(0.4))
+    // X 居中力（弱，让整体居中但不覆盖类聚合）
+    .force('centerX', d3.forceX(cx).strength(0.03))
+    // 类聚合：在 tick 中手动施加
+    .alphaDecay(0.03)  // 稍慢收敛，让聚合力生效
 
-  // Edges：CALLS 实线、IMPLEMENTS 虚线（Java interface → XML SQL 的桥接关系）
-  const link = g.append('g').selectAll('line')
+  // 手动加类聚合力
+  simulation.on('tick.cluster', () => classClusterForce(simulation!.alpha()))
+
+  // ── Edges ──
+  const link = g.append('g').attr('class', 'edges').selectAll('line')
     .data(links).join('line')
-    .attr('stroke', (d: any) => d.edge_type === 'IMPLEMENTS' ? '#ec4899' : '#94a3b8')
-    .attr('stroke-opacity', (d: any) => d.edge_type === 'IMPLEMENTS' ? 0.7 : 0.5)
-    .attr('stroke-width', (d: any) => Math.min(Math.sqrt(d.call_count), 4))
+    .attr('stroke', (d: any) => d.edge_type === 'IMPLEMENTS' ? '#ec4899' : '#475569')
+    .attr('stroke-opacity', 0.6)
+    .attr('stroke-width', (d: any) => Math.min(Math.sqrt(d.call_count || 1), 3))
     .attr('stroke-dasharray', (d: any) => d.edge_type === 'IMPLEMENTS' ? '5,4' : null)
     .attr('marker-end', 'url(#arrow)')
 
-  // Nodes：SQL 节点用菱形（rect rotate 45°），其他用圆形
-  // d3 selectAll 多形状最干净的做法是各跑一轮 join
-  const sqlNodes    = nodeData.filter((d: any) => d.node_type === 'sql')
-  const otherNodes  = nodeData.filter((d: any) => d.node_type !== 'sql')
+  // ── Nodes ──
+  const sqlNodes   = nodeData.filter((d: any) => d.node_type === 'sql')
+  const otherNodes = nodeData.filter((d: any) => d.node_type !== 'sql')
 
-  const nodeG = g.append('g')
+  const nodeG = g.append('g').attr('class', 'nodes')
 
-  // 圆形：普通方法 / Controller / Service / DAO interface
+  // 圆形节点
   const circleSel = nodeG.selectAll('circle')
     .data(otherNodes).join('circle')
     .attr('r', (d: any) => nodeRadius(d))
     .attr('fill', (d: any) => nodeColor(d))
-    .attr('stroke', (d: any) => d.id === centerId ? '#fff' : 'none')
-    .attr('stroke-width', 2.5)
+    .attr('stroke', (d: any) => d.id === centerId ? '#fff' : 'rgba(255,255,255,0.15)')
+    .attr('stroke-width', (d: any) => d.id === centerId ? 2.5 : 1)
     .style('cursor', 'pointer')
 
-  // 菱形：SQL 语句
+  // 菱形 SQL 节点
   const diamondSel = nodeG.selectAll('rect.sql')
     .data(sqlNodes).join('rect')
     .attr('class', 'sql')
     .attr('width',  (d: any) => nodeRadius(d) * 1.6)
     .attr('height', (d: any) => nodeRadius(d) * 1.6)
     .attr('fill', (d: any) => nodeColor(d))
-    .attr('stroke', (d: any) => d.id === centerId ? '#fff' : 'none')
-    .attr('stroke-width', 2.5)
+    .attr('stroke', (d: any) => d.id === centerId ? '#fff' : 'rgba(255,255,255,0.15)')
+    .attr('stroke-width', (d: any) => d.id === centerId ? 2.5 : 1)
     .style('cursor', 'pointer')
 
-  // 统一行为绑定到两种 selection
+  // 统一行为
   const allNodes: any = circleSel.merge(diamondSel as any)
+
+  // 单击：高亮直接连接的路径
+  allNodes.on('click', (evt: MouseEvent, d: any) => {
+    evt.stopPropagation()
+    selectedNodeId = selectedNodeId === d.id ? '' : d.id
+    updateHighlight()
+  })
+
+  // 双击：以该节点为中心重新查图
+  allNodes.on('dblclick', (_evt: MouseEvent, d: any) => {
+    if (d.id === centerId) return // 已经是中心
+    emit('expandNode', d.id, d.class_name)
+  })
+
+  // Hover tooltip
   allNodes
     .on('mousemove', (evt: MouseEvent, d: any) => {
       const rect = graphWrap.value!.getBoundingClientRect()
@@ -278,29 +416,89 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
       tooltipPos.value = { x: evt.clientX - rect.left + 12, y: evt.clientY - rect.top - 10 }
     })
     .on('mouseleave', () => { hovered.value = null })
-    .call(d3.drag<SVGElement, any>()
-      .on('start', (e, d) => { if (!e.active) simulation!.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
-      .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y })
-      .on('end',   (e, d) => { if (!e.active) simulation!.alphaTarget(0); d.fx = null; d.fy = null })
-    )
+
+  // Drag
+  allNodes.call(d3.drag<SVGElement, any>()
+    .on('start', (e, d) => { if (!e.active) simulation!.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
+    .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y })
+    .on('end',   (e, d) => {
+      if (!e.active) simulation!.alphaTarget(0)
+      // 中心节点保持 pin
+      if (d.id !== centerId) { d.fx = null; d.fy = null }
+    })
+  )
 
   // Labels
-  const label = g.append('g').selectAll('text')
+  const label = g.append('g').attr('class', 'labels').selectAll('text')
     .data(nodeData).join('text')
     .text((d: any) => d.name.length > 18 ? d.name.slice(0, 16) + '…' : d.name)
     .attr('font-size', 11)
-    .attr('fill', '#e2e8f0')
+    .attr('fill', '#94a3b8')
     .attr('text-anchor', 'middle')
     .attr('dy', (d: any) => nodeRadius(d) + 13)
     .style('pointer-events', 'none')
 
-  // 硬边界：tick 内把节点位置 clamp 到 [pad, W-pad] × [pad, H-pad]，
-  // 哪怕 force 算出来 fly-off-screen，渲染前也拉回来
+  // 高亮更新函数
+  function updateHighlight() {
+    if (!selectedNodeId) {
+      // 取消高亮：恢复所有
+      circleSel.attr('opacity', 1)
+      diamondSel.attr('opacity', 1)
+      link.attr('stroke-opacity', 0.6)
+        .attr('stroke', (d: any) => d.edge_type === 'IMPLEMENTS' ? '#ec4899' : '#475569')
+        .attr('stroke-width', (d: any) => Math.min(Math.sqrt(d.call_count || 1), 3))
+        .attr('marker-end', 'url(#arrow)')
+      label.attr('opacity', 1)
+      return
+    }
+
+    // 找出直接连接的节点
+    const connected = new Set<string>([selectedNodeId])
+    for (const l of links) {
+      const src = (l.source as any).id
+      const tgt = (l.target as any).id
+      if (src === selectedNodeId) connected.add(tgt)
+      if (tgt === selectedNodeId) connected.add(src)
+    }
+
+    // 淡化非连接节点
+    circleSel.attr('opacity', (d: any) => connected.has(d.id) ? 1 : 0.15)
+    diamondSel.attr('opacity', (d: any) => connected.has(d.id) ? 1 : 0.15)
+    label.attr('opacity', (d: any) => connected.has(d.id) ? 1 : 0.1)
+
+    // 高亮连接的边
+    link
+      .attr('stroke-opacity', (d: any) => {
+        const src = (d.source as any).id
+        const tgt = (d.target as any).id
+        return (src === selectedNodeId || tgt === selectedNodeId) ? 1 : 0.08
+      })
+      .attr('stroke', (d: any) => {
+        const src = (d.source as any).id
+        const tgt = (d.target as any).id
+        if (src === selectedNodeId || tgt === selectedNodeId) return '#00d4ff'
+        return d.edge_type === 'IMPLEMENTS' ? '#ec4899' : '#475569'
+      })
+      .attr('stroke-width', (d: any) => {
+        const src = (d.source as any).id
+        const tgt = (d.target as any).id
+        if (src === selectedNodeId || tgt === selectedNodeId) return 2.5
+        return Math.min(Math.sqrt(d.call_count || 1), 3)
+      })
+      .attr('marker-end', (d: any) => {
+        const src = (d.source as any).id
+        const tgt = (d.target as any).id
+        return (src === selectedNodeId || tgt === selectedNodeId) ? 'url(#arrow-hl)' : 'url(#arrow)'
+      })
+  }
+
+  // ── Tick ──
   const pad = 40
   simulation.on('tick', () => {
+    // 约束边界
     nodeData.forEach((d: any) => {
-      d.x = Math.max(pad, Math.min(W - pad, d.x))
-      d.y = Math.max(pad, Math.min(H - pad, d.y))
+      if (d.fx == null) d.x = Math.max(pad, Math.min(W - pad, d.x))
+      if (d.fy == null) d.y = Math.max(pad, Math.min(H - pad, d.y))
     })
     link
       .attr('x1', (d: any) => d.source.x)
@@ -310,7 +508,6 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
     circleSel
       .attr('cx', (d: any) => d.x)
       .attr('cy', (d: any) => d.y)
-    // 菱形：rect 用左上角定位，旋转 45° 后中心还在 (x, y)
     diamondSel
       .attr('x', (d: any) => d.x - nodeRadius(d) * 0.8)
       .attr('y', (d: any) => d.y - nodeRadius(d) * 0.8)
@@ -320,14 +517,12 @@ function renderGraph(nodes: GraphNode[], edges: GraphEdge[], centerId: string) {
       .attr('y', (d: any) => d.y)
   })
 
-  // simulation 冷却完成后，按节点包围盒自动缩放使整图刚好充满视口
+  // simulation 冷却完成后自动缩放
   simulation.on('end', () => fitToView())
 }
 
 
 // ── 视图自适应 ─────────────────────────────────────────────────────────────
-// 计算当前所有节点包围盒，平移+缩放使其居中铺满。被 simulation.on('end') 和
-// 工具栏「重置视图」按钮共用。
 function fitToView() {
   if (!svgSel || !zoomBehavior || !lastNodeData.length) return
   const { W, H } = lastViewport
@@ -340,12 +535,11 @@ function fitToView() {
   const w = maxX - minX || 1
   const h = maxY - minY || 1
 
-  // padding 给标签留位置
   const padInner = 60
   const scale = Math.min(
     (W - padInner * 2) / w,
     (H - padInner * 2) / h,
-    1.4,    // 节点少时也别放太大
+    1.4,
   )
   const tx = W / 2 - scale * (minX + w / 2)
   const ty = H / 2 - scale * (minY + h / 2)
@@ -357,6 +551,10 @@ function fitToView() {
 }
 
 // ── Controls ───────────────────────────────────────────────────────────────
+const emit = defineEmits<{
+  (e: 'expandNode', symbolId: string, className?: string): void
+}>()
+
 function switchView(v: ViewKey) {
   activeView.value = v
   loadGraph()
@@ -368,41 +566,27 @@ function changeDepth(delta: number) {
 }
 
 // ── Watchers ───────────────────────────────────────────────────────────────
-
-/**
- * reloadTick 每次点「依赖」按钮都自增。
- * 即使 symbolId / requestedView 没有变化，也强制重新加载图，
- * 解决"换了方法再点没反应"的问题。
- */
 watch(() => props.reloadTick, (tick, oldTick) => {
   if (tick === oldTick || tick === undefined) return
   if (props.requestedView) activeView.value = props.requestedView
   loadGraph()
 })
 
-/**
- * 工具栏「依赖」按钮触发：requestedView 变化时切换子视图并重新加载。
- * Vue 3 在同一 tick 内对多个响应式源的变更只触发一次 watcher，
- * 所以 requestedView + symbolId/className 同时变化时不会重复调用 loadGraph。
- */
 watch(() => props.requestedView, (v) => {
   if (!v) return
   activeView.value = v
   loadGraph()
 })
 
-// 搜索结果点击后 symbolId 变化 → 如果当前是方法/影响域视图则刷新
 watch(() => props.symbolId, (newId, oldId) => {
   if (newId !== oldId && newId && activeView.value !== 'class') loadGraph()
 })
 
-// className 变化 → 如果当前是类依赖图视图则刷新
 watch(() => props.className, (newCls, oldCls) => {
   if (newCls !== oldCls && newCls && activeView.value === 'class') loadGraph()
 })
 
 onMounted(() => {
-  // 初次挂载时若已有数据，根据 requestedView 或可用 prop 决定加载
   if (props.requestedView) {
     activeView.value = props.requestedView
     loadGraph()
@@ -458,7 +642,7 @@ onUnmounted(() => { simulation?.stop() })
   line-height: 1;
 }
 
-/* 浮动控件容器：贴在图右下角，半透明背景，悬停时更明显 */
+/* 浮动控件 */
 .floating-controls {
   position: absolute;
   right: 12px;
@@ -468,11 +652,11 @@ onUnmounted(() => { simulation?.stop() })
   gap: 8px;
   padding: 6px 8px;
   border-radius: 8px;
-  background: rgba(15, 23, 42, 0.78);
+  background: rgba(15, 23, 42, 0.85);
   backdrop-filter: blur(6px);
   border: 1px solid rgba(148, 163, 184, 0.18);
   z-index: 10;
-  opacity: 0.65;
+  opacity: 0.7;
   transition: opacity 0.15s ease;
 }
 .floating-controls:hover { opacity: 1; }
@@ -509,6 +693,22 @@ onUnmounted(() => { simulation?.stop() })
 .recenter-btn:hover {
   color: #fff;
   border-color: var(--accent, #6366f1);
+}
+
+/* 提示横幅 */
+.hint-banner {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 10px;
+  color: #64748b;
+  z-index: 10;
+  pointer-events: none;
 }
 
 .legend {

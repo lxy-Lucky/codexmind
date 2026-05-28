@@ -213,7 +213,8 @@
     "reset": "⤢ Reset",
     "resetTitle": "Reset view",
     "tooltipMeta": "PageRank: {pr} · Inbound: {in}",
-    "impactSummary": "{n} methods affected (within {d} hops)"
+    "impactSummary": "{n} methods affected (within {d} hops)",
+    "dblClickHint": "Double-click a node to expand its call chain"
   },
   "errors": {
     "requestFailed": "Request failed",

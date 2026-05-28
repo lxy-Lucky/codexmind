@@ -213,7 +213,8 @@
     "reset": "⤢ リセット",
     "resetTitle": "ビューをリセット",
     "tooltipMeta": "PageRank: {pr} · 被呼び出し: {in}",
-    "impactSummary": "{n} 個のメソッドが影響を受けます（{d} ホップ以内）"
+    "impactSummary": "{n} 個のメソッドが影響を受けます（{d} ホップ以内）",
+    "dblClickHint": "ノードをダブルクリックして呼び出しチェーンを展開"
   },
   "errors": {
     "requestFailed": "リクエスト失敗",

@@ -99,9 +99,7 @@
     "summaryTitle": "コード解説",
     "summaryShort": "解説",
     "bugTitle": "Bug 検出",
-    "bugShort": "Bug",
-    "depsTitle": "依存分析",
-    "depsShort": "依存"
+    "bugShort": "Bug"
   },
   "editor": {
     "emptyPrimary": "左側のファイルツリーからファイルを選択",
@@ -113,12 +111,10 @@
     "tabs": {
       "summary": "コード解説",
       "bug": "Bug",
-      "deps": "依存グラフ",
       "history": "履歴",
       "chat": "Q&A",
       "docs": "ドキュメント",
-      "insight": "Insight",
-      "graph": "コールグラフ"
+      "insight": "Insight"
     }
   },
   "insight": {
@@ -193,28 +189,6 @@
       "explain": "解説",
       "deps": "依存"
     }
-  },
-  "deps": {
-    "views": {
-      "method": "メソッド呼び出し図",
-      "class": "クラス依存図",
-      "impact": "影響範囲"
-    },
-    "legend": {
-      "controller": "Controller",
-      "service": "Service",
-      "dao": "DAO/Mapper",
-      "sql": "SQL",
-      "util": "Util/Other"
-    },
-    "empty": "コード行を選択すると呼び出し図がここに表示されます",
-    "loading": "読み込み中…",
-    "depth": "深さ",
-    "reset": "⤢ リセット",
-    "resetTitle": "ビューをリセット",
-    "tooltipMeta": "PageRank: {pr} · 被呼び出し: {in}",
-    "impactSummary": "{n} 個のメソッドが影響を受けます（{d} ホップ以内）",
-    "dblClickHint": "ノードをダブルクリックして呼び出しチェーンを展開"
   },
   "errors": {
     "requestFailed": "リクエスト失敗",

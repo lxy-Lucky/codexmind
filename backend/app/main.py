@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import repo, search, analysis
-from app.api.graph import router as graph_router
 from app.core.config import settings
 from app.db.database import init_db
 
@@ -76,7 +75,6 @@ app.add_middleware(
 app.include_router(repo.router)
 app.include_router(search.router)
 app.include_router(analysis.router)
-app.include_router(graph_router)
 
 
 @app.get("/api/status", tags=["system"])

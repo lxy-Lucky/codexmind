@@ -99,9 +99,7 @@
     "summaryTitle": "Code explain",
     "summaryShort": "Explain",
     "bugTitle": "Bug detect",
-    "bugShort": "Bug",
-    "depsTitle": "Dependency analysis",
-    "depsShort": "Deps"
+    "bugShort": "Bug"
   },
   "editor": {
     "emptyPrimary": "Pick a file from the tree on the left",
@@ -113,12 +111,10 @@
     "tabs": {
       "summary": "Explain",
       "bug": "Bug",
-      "deps": "Graph",
       "history": "History",
       "chat": "Chat",
       "docs": "Docs",
-      "insight": "Insight",
-      "graph": "Graph"
+      "insight": "Insight"
     }
   },
   "insight": {
@@ -193,28 +189,6 @@
       "explain": "Explain",
       "deps": "Deps"
     }
-  },
-  "deps": {
-    "views": {
-      "method": "Method call graph",
-      "class": "Class dependency graph",
-      "impact": "Impact"
-    },
-    "legend": {
-      "controller": "Controller",
-      "service": "Service",
-      "dao": "DAO/Mapper",
-      "sql": "SQL",
-      "util": "Util/Other"
-    },
-    "empty": "Select a code line — the call graph will appear here",
-    "loading": "Loading…",
-    "depth": "Depth",
-    "reset": "⤢ Reset",
-    "resetTitle": "Reset view",
-    "tooltipMeta": "PageRank: {pr} · Inbound: {in}",
-    "impactSummary": "{n} methods affected (within {d} hops)",
-    "dblClickHint": "Double-click a node to expand its call chain"
   },
   "errors": {
     "requestFailed": "Request failed",

@@ -2,27 +2,17 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAnalysisStore } from '@/stores/analysisStore'
-import { useRepoStore }     from '@/stores/repoStore'
 import InsightPanel from './InsightPanel.vue'
-import TabDeps    from './tabs/TabDeps.vue'
 import TabHistory from './tabs/TabHistory.vue'
 
 const { t } = useI18n()
 const analysis = useAnalysisStore()
-const repo     = useRepoStore()
 
 type Tab = { id: typeof analysis.activeTab; labelKey: string; icon: string }
 const tabs = computed<Tab[]>(() => [
   { id: 'insight', labelKey: 'analysis.tabs.insight', icon: '◇' },
-  { id: 'deps',    labelKey: 'analysis.tabs.graph',   icon: '◆' },
   { id: 'history', labelKey: 'analysis.tabs.history', icon: '⟲' },
 ])
-
-/** 双击节点 → 切换中心并强制刷新图 */
-function onExpandNode(symbolId: string, className?: string) {
-  analysis.setGraphSymbol(symbolId, className)
-  analysis.depsReloadTick++
-}
 </script>
 
 <template>
@@ -64,15 +54,6 @@ function onExpandNode(symbolId: string, className?: string) {
 
     <div class="flex-1 overflow-hidden min-h-0 flex flex-col">
       <InsightPanel v-if="analysis.activeTab === 'insight'" />
-      <TabDeps
-        v-else-if="analysis.activeTab === 'deps'"
-        :repo-id="repo.currentRepo?.id ?? ''"
-        :symbol-id="analysis.currentSymbolId"
-        :class-name="analysis.currentClassName"
-        :requested-view="analysis.depsView"
-        :reload-tick="analysis.depsReloadTick"
-        @expand-node="onExpandNode"
-      />
       <TabHistory   v-else-if="analysis.activeTab === 'history'" />
     </div>
   </aside>

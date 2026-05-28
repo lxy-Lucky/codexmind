@@ -9,11 +9,9 @@ import type { AnalysisMode, BugItem, ChatMessage, SSEChunk, DocsProgress, Insigh
 
 export const useAnalysisStore = defineStore('analysis', () => {
   // ── State ──────────────────────────────────────────────────────────────────
-  const activeTab      = ref<'summary' | 'bug' | 'deps' | 'history' | 'chat' | 'docs' | 'insight' | 'graph'>('insight')
+  const activeTab      = ref<'summary' | 'bug' | 'history' | 'chat' | 'docs' | 'insight'>('insight')
   const currentSymbolId  = ref('')
   const currentClassName = ref('')
-  const depsView       = ref<'method' | 'class' | 'impact'>('class')  // 依赖图子视图
-  const depsReloadTick = ref(0)   // 每次点"依赖"都自增，强制 TabDeps 重新加载
   const streaming      = ref(false)
   const streamingText = ref('')
   const bugItems      = ref<BugItem[]>([])
@@ -46,47 +44,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
   function setGraphSymbol(symbolId: string, className?: string) {
     currentSymbolId.value  = symbolId
     currentClassName.value = className ?? ''
-  }
-
-  /**
-   * 工具栏「依赖」按钮的专用入口。每次点击都重新判断当前光标所在方法。
-   * 优先级：
-   *   1. 光标在某个方法内 → 更新 currentSymbolId → 方法调用图
-   *   2. 光标不在方法内但曾有 symbolId → 沿用上次的方法调用图
-   *   3. 都没有 → 类依赖图（类名从文件名提取）
-   * 无论视图是否切换，都会自增 depsReloadTick，强制 TabDeps 重新加载。
-   */
-  async function openDepsGraph() {
-    const editorStore = useEditorStore()
-    const repoStore   = useRepoStore()
-    const file = editorStore.currentFile
-    if (!file) { error.value = t('errors.noFileOpen'); return }
-
-    activeTab.value = 'deps'
-
-    // 每次点击都从光标位置重新查 symbol（支持换方法后再点击）
-    const cursorLine = editorStore.editorInstance?.getPosition()?.lineNumber ?? null
-    if (cursorLine && repoStore.currentRepo) {
-      try {
-        const sym = await repoApi.symbolAt(repoStore.currentRepo.id, file.path, cursorLine)
-        if (sym?.id) {
-          currentSymbolId.value  = sym.id
-          currentClassName.value = sym.class_name ?? ''
-        }
-      } catch { /* 忽略，使用上次的 symbolId */ }
-    }
-
-    // 决定子视图
-    if (currentSymbolId.value) {
-      depsView.value = 'method'
-    } else {
-      const fileName = file.path.replace(/\\/g, '/').split('/').pop() ?? ''
-      currentClassName.value = fileName.replace(/\.[^.]+$/, '')
-      depsView.value = 'class'
-    }
-
-    // 强制 TabDeps 重新加载（即使 symbolId / view 与上次完全相同）
-    depsReloadTick.value++
   }
 
   function abort() {
@@ -378,10 +335,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   function _tabToMode(tab: string): AnalysisMode {
-    return ({ summary:'summary', bug:'bug', deps:'deps', history:'summary', chat:'custom', docs:'docs', insight:'custom' } as any)[tab] ?? 'summary'
+    return ({ summary:'summary', bug:'bug', history:'summary', chat:'custom', docs:'docs', insight:'custom' } as any)[tab] ?? 'summary'
   }
   function _modeToTab(mode: AnalysisMode): typeof activeTab.value {
-    return ({ summary:'insight', bug:'insight', deps:'deps', custom:'insight', docs:'insight' } as any)[mode] ?? 'insight'
+    return ({ summary:'insight', bug:'insight', custom:'insight', docs:'insight' } as any)[mode] ?? 'insight'
   }
 
 
@@ -400,13 +357,13 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   return {
-    activeTab, currentSymbolId, currentClassName, depsView, depsReloadTick,
+    activeTab, currentSymbolId, currentClassName,
     streaming, streamingText, bugItems,
     confidence, latencyMs, error, hasResult,
     chatHistory, chatStreaming,
     docsText, docsStreaming, docsProgress,
     insightCards, insightStreaming,
-    setTab, setGraphSymbol, openDepsGraph, analyze, abort,
+    setTab, setGraphSymbol, analyze, abort,
     sendChat, clearChat, sendInsight, clearInsight, generateFileDocs,
   }
 })

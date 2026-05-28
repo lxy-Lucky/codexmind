@@ -24,13 +24,6 @@ class GraphEdge(BaseModel):
     call_count: int = 1
 
 
-class GraphResponse(BaseModel):
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
-    center_id: str               # 查询起点 node id
-    depth: int = 1
-
-
 class ImpactResponse(BaseModel):
     """影响域：修改某方法后，哪些调用者会受影响"""
     nodes: list[GraphNode]
@@ -38,13 +31,3 @@ class ImpactResponse(BaseModel):
     center_id: str
     max_depth: int = 3
     total_affected: int = 0
-
-
-class PathResponse(BaseModel):
-    """两个方法之间的最短调用路径"""
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
-    from_id: str
-    to_id: str
-    path_length: int = 0
-    found: bool = False

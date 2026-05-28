@@ -99,9 +99,7 @@
     "summaryTitle": "代码解读",
     "summaryShort": "解读",
     "bugTitle": "Bug 检测",
-    "bugShort": "Bug",
-    "depsTitle": "依赖分析",
-    "depsShort": "依赖"
+    "bugShort": "Bug"
   },
   "editor": {
     "emptyPrimary": "从左侧文件树选择文件",
@@ -113,12 +111,10 @@
     "tabs": {
       "summary": "代码解读",
       "bug": "Bug",
-      "deps": "依赖图",
       "history": "历史",
       "chat": "问答",
       "docs": "文档",
-      "insight": "Insight",
-      "graph": "调用图"
+      "insight": "Insight"
     }
   },
   "insight": {
@@ -193,28 +189,6 @@
       "explain": "解释",
       "deps": "依赖"
     }
-  },
-  "deps": {
-    "views": {
-      "method": "方法调用图",
-      "class": "类依赖图",
-      "impact": "影响域"
-    },
-    "legend": {
-      "controller": "Controller",
-      "service": "Service",
-      "dao": "DAO/Mapper",
-      "sql": "SQL",
-      "util": "Util/Other"
-    },
-    "empty": "选中代码行后，调用图将在此显示",
-    "loading": "加载中…",
-    "depth": "深度",
-    "reset": "⤢ 重置",
-    "resetTitle": "重置视图",
-    "tooltipMeta": "PageRank: {pr} · 被调用: {in}",
-    "impactSummary": "共 {n} 个方法受影响（{d} 跳以内）",
-    "dblClickHint": "双击节点可展开其调用链"
   },
   "errors": {
     "requestFailed": "请求失败",

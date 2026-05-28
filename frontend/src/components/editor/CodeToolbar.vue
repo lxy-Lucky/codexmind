@@ -49,9 +49,6 @@ function copyPath() {
       <button class="toolbar-btn danger" :title="t('toolbar.bugTitle')" @click="triggerAnalysis('bug')">
         ◉ {{ t('toolbar.bugShort') }}
       </button>
-      <button class="toolbar-btn purple" :title="t('toolbar.depsTitle')" @click="analysis.openDepsGraph()">
-        ⟳ {{ t('toolbar.depsShort') }}
-      </button>
     </div>
   </div>
 </template>
@@ -63,5 +60,4 @@ function copyPath() {
          hover:border-cyan hover:text-cyan hover:bg-cyan-dim transition-all;
 }
 .toolbar-btn.danger { @apply hover:border-red-accent hover:text-red-accent hover:bg-red-accent/10; }
-.toolbar-btn.purple { @apply hover:border-purple hover:text-purple hover:bg-purple/10; }
 </style>
